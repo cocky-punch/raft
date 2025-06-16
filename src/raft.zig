@@ -71,23 +71,23 @@ pub fn RaftNode(comptime T: type) type {
             // Reset election timeout here if there's one
             self.resetElectionTimeout();
 
+            // Determine last log index and term
+            const last_log_index =
+                if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+
+            const last_log_term =
+                if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+
+            const req = types.RequestVote{
+                .term = self.current_term,
+                .candidate_id = self.config.self_id,
+                .last_log_index = last_log_index,
+                .last_log_term = last_log_term,
+            };
+
             // Send RequestVote RPCs to all other nodes
             for (self.config.nodes) |node| {
                 if (node.id == self.config.self_id) continue;
-
-                // Determine last log index and term
-                const last_log_index =
-                    if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
-
-                const last_log_term =
-                    if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
-
-                const req = types.RequestVote{
-                    .term = self.current_term,
-                    .candidate_id = self.config.self_id,
-                    .last_log_index = last_log_index,
-                    .last_log_term = last_log_term,
-                };
 
                 _ = cluster.sendMessage(node.id, RpcMessage{ .RequestVote = req }) catch {
                     std.debug.print("Failed to send RequestVote to: {}\n", .{node.id});
@@ -119,7 +119,6 @@ pub fn RaftNode(comptime T: type) type {
                 .Follower => {
                     if (now >= self.election_deadline_ms) {
                         self.startElection(cluster);
-                        self.resetElectionTimeout();
 
                         //TODO
                         //self.becomeCandidate();
@@ -129,7 +128,6 @@ pub fn RaftNode(comptime T: type) type {
                     // If election timeout expired, start new election (with jitter/backoff if you want)
                     if (now >= self.election_deadline_ms) {
                         self.startElection(cluster);
-                        self.resetElectionTimeout();
                     }
                 },
                 .Leader => {
