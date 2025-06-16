@@ -1,0 +1,579 @@
+const std = @import("std");
+const types = @import("types.zig");
+pub const StateMachine = @import("state_machine.zig").StateMachine;
+const RaftState = types.RaftState;
+const NodeId = types.NodeId;
+const RpcMessage = types.RpcMessage;
+const Log = @import("log.zig").Log;
+const Command = @import("command.zig").Command;
+const LogEntry = @import("log_entry.zig").LogEntry;
+const ElectionTimeoutBase: u64 = 150;
+const ElectionTimeoutJitter: u64 = 150;
+
+
+pub fn RaftNode(comptime T: type) type {
+    return struct {
+        config: types.RaftConfig,
+        allocator: std.mem.Allocator,
+        state: RaftState,
+        current_term: types.Term,
+        voted_for: ?NodeId,
+        log: Log,
+        election_deadline: u64, // ms timestamp
+
+        inbox: std.ArrayList(RpcMessage),
+        votes_received: usize,
+        total_votes: usize,
+        election_deadline_ms: u64, // timestamp in ms when election timeout expires
+        commit_index: usize,
+        next_index: []usize,   // for each follower: index of the next log entry to send
+        match_index: []usize,  // for each follower: highest log entry known to be replicated
+        node_id_to_index: std.AutoHashMap(NodeId, usize),
+        last_applied: usize = 0,
+
+        // state_machine: anytype,
+        // state_machine: ?*T,
+        state_machine: ?StateMachine(T) = null,
+
+        const Self = @This();
+
+        pub fn init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
+            const nodes = std.ArrayList(types.Node).init(allocator);
+            return Self {
+                .allocator = allocator,
+                .state = .Follower,
+                .current_term = 0,
+                .voted_for = null,
+                .election_deadline = 0,
+                .inbox = std.ArrayList(RpcMessage).init(allocator),
+                .votes_received = 0,
+                .total_votes = 0,
+                .election_deadline_ms = 0,
+                .commit_index = 0,
+                .next_index = &[_]usize{},
+                .match_index = &[_]usize{},
+                .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
+                .log = Log.init(allocator),
+                .config = types.RaftConfig {
+                    .self_id = id,
+                    .nodes = nodes.items,
+                },
+                .state_machine = sm,
+            };
+        }
+
+        fn startElection(self: *RaftNode(T), cluster: *Cluster(T)) void {
+            self.state = .Candidate;
+            self.current_term += 1;
+            self.voted_for = self.config.self_id;
+            self.votes_received = 1; // vote for self
+            self.total_votes = self.config.nodes.len;
+
+            // Reset election timeout here if there's one
+            self.resetElectionTimeout();
+
+            // Send RequestVote RPCs to all other nodes
+            for (self.config.nodes) |node| {
+                if (node.id == self.config.self_id) continue;
+
+                // Determine last log index and term
+                const last_log_index =
+                    if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+
+                const last_log_term =
+                    if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+
+                const req = types.RequestVote{
+                    .term = self.current_term,
+                    .candidate_id = self.config.self_id,
+                    .last_log_index = last_log_index,
+                    .last_log_term = last_log_term,
+                };
+
+                _ = cluster.sendMessage(node.id, RpcMessage {.RequestVote = req}) catch {
+                    std.debug.print("Failed to send RequestVote to: {}\n", .{node.id});
+                };
+            }
+        }
+
+        pub fn tick(self: *RaftNode(T), cluster: *Cluster(T)) void {
+            const now = std.time.milliTimestamp();
+
+            // Process incoming messages first
+            while (self.inbox.items.len > 0) {
+                if (self.inbox.pop()) |msg| {
+                    switch (msg) {
+                        .RequestVote => |req| self.handleRequestVote(req, cluster),
+                        .RequestVoteResponse => |resp| self.handleRequestVoteResponse(resp, cluster),
+                        .AppendEntries => |req| self.handleAppendEntries(req, cluster),
+                        .AppendEntriesResponse => |resp| self.handleAppendEntriesResponse(resp, cluster),
+
+                        .InstallSnapshot => |_| {},
+                        .InstallSnapshotResponse => |_| {},
+                        .TimeoutNow => |_| {},
+                    }
+                }
+            }
+
+            // Handle state-specific periodic work
+            switch (self.state) {
+                .Follower => {
+                    if (now >= self.election_deadline_ms) {
+                        self.startElection(cluster);
+                        self.resetElectionTimeout();
+
+                        //TODO
+                        //self.becomeCandidate();
+                    }
+                },
+                .Candidate => {
+                    // If election timeout expired, start new election (with jitter/backoff if you want)
+                    if (now >= self.election_deadline_ms) {
+                        self.startElection(cluster);
+                        self.resetElectionTimeout();
+                    }
+                },
+                .Leader => {
+                    // Send heartbeat regularly (could add timer for heartbeat interval)
+                    sendHeartbeats(self, cluster);
+                },
+            }
+
+            while (self.last_applied < self.commit_index) {
+                self.last_applied += 1;
+                const entry = self.log.get(self.last_applied - 1) orelse continue;
+                self.applyLog(entry);
+            }
+        }
+
+        fn applyLog(self: *RaftNode(T), entry: LogEntry) void {
+            std.debug.print("Applied entry at index {}: {}\n", .{
+                self.last_applied,
+                entry.command,
+            });
+
+
+            //TODO
+            // while (self.last_applied < self.commit_index) {
+            //     self.last_applied += 1;
+            //     const entry = self.log.get(self.last_applied - 1) orelse continue;
+            //     self.state_machine.applyLog(entry);
+            // }
+        }
+
+        fn becomeCandidate(self: *RaftNode(T)) void {
+            self.state = .Candidate;
+            self.current_term += 1;
+            self.voted_for = self.id;
+            self.resetElectionTimeout();
+            // Send RequestVote to other nodes (to be implemented)
+        }
+
+        fn becomeFollower(self: *RaftNode(T)) void {
+            self.state = .Follower;
+            self.voted_for = null;
+            self.resetElectionTimeout();
+        }
+
+        fn resetElectionTimeout(self: *RaftNode(T)) void {
+            const jitter = @mod(std.crypto.random.int(u64), ElectionTimeoutJitter);
+            const now_ms: u64 = @intCast(std.time.milliTimestamp()); // safe since time is positive
+            self.election_deadline = now_ms + ElectionTimeoutBase + jitter;
+        }
+
+        pub fn enqueueMessage(self: *RaftNode(T), msg: RpcMessage) !void {
+                try self.inbox.append(msg);
+            }
+
+        pub fn processMessages(self: *RaftNode(T), cluster: *Cluster(T)) !void {
+            while (self.inbox.items.len > 0) {
+                if (self.inbox.pop()) |msg| {
+                    switch (msg) {
+                        RpcMessage.RequestVote => |req| {
+                            self.handleRequestVote(req, cluster);
+                        },
+                        RpcMessage.AppendEntries => |req| {
+                            self.handleAppendEntries(req, cluster);
+                        },
+                        RpcMessage.RequestVoteResponse => |resp| {
+                            self.handleRequestVoteResponse(resp, cluster);
+                        },
+                        RpcMessage.AppendEntriesResponse => |resp| {
+                            self.handleAppendEntriesResponse(resp, cluster);
+                        },
+
+                        RpcMessage.InstallSnapshot => |_| {},
+                        RpcMessage.InstallSnapshotResponse => |_| {},
+                        RpcMessage.TimeoutNow => |_| {},
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        fn handleRequestVote(self: *RaftNode(T), req: types.RequestVote, cluster: *Cluster(T)) void {
+            if (req.term > self.current_term) {
+                self.current_term = req.term;
+                self.voted_for = null;
+                self.becomeFollower();
+            }
+
+            var vote_granted = false;
+
+            const candidate_up_to_date = blk: {
+                const last_log_index =
+                    if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+
+                const last_log_term =
+                    if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+
+                if (req.last_log_term > last_log_term) break :blk true;
+                if (req.last_log_term < last_log_term) break :blk false;
+
+                // Same term — compare index
+                break :blk req.last_log_index >= last_log_index;
+            };
+
+            if (req.term == self.current_term) {
+                if ((self.voted_for == null or self.voted_for.? == req.candidate_id) and candidate_up_to_date) {
+                    self.voted_for = req.candidate_id;
+                    vote_granted = true;
+
+                    // Reset election timeout if needed
+                    self.resetElectionTimeout();
+                }
+            }
+
+            const resp = types.RequestVoteResponse{
+                .term = self.current_term,
+                .vote_granted = vote_granted,
+                .voter_id = self.config.self_id,
+            };
+
+            _ = cluster.sendMessage(req.candidate_id, types.RpcMessage{ .RequestVoteResponse = resp }) catch {
+                std.debug.print("Failed to send RequestVoteResponse to {}\n", .{req.candidate_id});
+            };
+        }
+
+
+        fn handleAppendEntries(self: *RaftNode(T), req: types.AppendEntries, cluster: *Cluster(T)) void {
+            if (req.term < self.current_term) {
+                const resp = types.AppendEntriesResponse{
+                    .term = self.current_term,
+                    .success = false,
+                    .follower_id = self.config.self_id,
+                    .match_index = 0,
+                };
+
+                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
+                return;
+            }
+
+            // If term is greater, step down
+            if (req.term > self.current_term) {
+                self.current_term = req.term;
+                self.voted_for = null;
+                self.becomeFollower();
+            } else {
+                self.resetElectionTimeout();
+            }
+
+            // Log consistency check
+            const prev_log_term = self.log.termAt(req.prev_log_index);
+            if (prev_log_term == null or prev_log_term.? != req.prev_log_term) {
+                const resp = types.AppendEntriesResponse{
+                    .term = self.current_term,
+                    .success = false,
+                    .follower_id = self.config.self_id,
+                    .match_index = 0,
+                };
+
+                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
+                return;
+            }
+
+            // Append new entries (if any), replacing conflicts
+            var i: usize = 0;
+            while (i < req.entries.len) {
+                const index = req.prev_log_index + 1 + i;
+                const existing = self.log.get(index);
+
+                if (existing == null or existing.?.term != req.entries[i].term) {
+                    // Truncate and append
+                    self.log.truncate(index);
+                    // _ = self.log.appendSlice(req.entries[i..]) catch {};
+                    _ = self.log.entries.appendSlice(req.entries[i..]) catch {};
+                    break;
+                }
+
+                i += 1;
+            }
+
+            // Update commit index
+            if (req.leader_commit > self.commit_index) {
+                const new_commit = @min(req.leader_commit, self.log.lastIndex());
+                self.commit_index = new_commit;
+                _ = self.applyCommitted(); // Apply entries to state machine
+            }
+
+            const resp = types.AppendEntriesResponse{
+                .term = self.current_term,
+                .success = true,
+                .follower_id = self.config.self_id,
+                .match_index = req.prev_log_index + req.entries.len,
+            };
+
+            _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
+        }
+
+        fn applyCommitted(self: *RaftNode(T)) void {
+            while (self.last_applied < self.commit_index) {
+                const entry = self.log.get(self.last_applied) orelse break;
+                if (self.state_machine) |sm| {
+                    sm.applyLog(entry);
+                }
+
+                self.last_applied += 1;
+            }
+        }
+
+        fn handleRequestVoteResponse(self: *RaftNode(T), resp: types.RequestVoteResponse,
+            cluster: *Cluster(T)
+        ) void {
+            if (self.state != .Candidate) return;
+
+            if (resp.term > self.current_term) {
+                // Step down to follower
+                self.current_term = resp.term;
+                self.becomeFollower();
+                return;
+            }
+
+            if (resp.vote_granted) {
+                self.votes_received += 1;
+
+                const majority = (cluster.nodes.items.len / 2) + 1;
+                if (self.votes_received >= majority and self.state == .Candidate) {
+                    // Become leader once majority is reached
+                    self.becomeLeader(cluster) catch {
+                        std.debug.print("Failed to becomeLeader for the node_id: {}\n", .{self.config.self_id});
+                    };
+                }
+            }
+        }
+
+
+        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: types.AppendEntriesResponse,
+            cluster: *Cluster(T)
+        ) void {
+            if (resp.term > self.current_term) {
+                self.current_term = resp.term;
+                self.becomeFollower();
+                return;
+            }
+
+            const follower_index = self.findNodeIndex(resp.follower_id) orelse return;
+
+            if (resp.success) {
+                self.match_index[follower_index] = resp.match_index;
+                self.next_index[follower_index] = resp.match_index + 1;
+
+                // Try to advance commit index
+                const majority = (self.config.nodes.len / 2) + 1;
+                var new_commit_index = self.commit_index + 1;
+
+                while (new_commit_index <= self.log.entries.items.len) : (new_commit_index += 1) {
+                    var replicated_count: usize = 1; // count self
+                    for (self.match_index) |idx| {
+                        if (idx >= new_commit_index) replicated_count += 1;
+                    }
+
+                    // Only commit entries from current term
+                    if (replicated_count >= majority and
+                        self.log.termAt(new_commit_index - 1) == self.current_term)
+                    {
+                        self.commit_index = new_commit_index;
+
+
+                        // Apply committed entries
+                        _ = self.applyCommitted();
+
+                        // Broadcast updated commit index to others
+                        // FIXME: i
+                        for (cluster.nodes.items, 0..) |follower, i| {
+                            if (follower.config.self_id == self.config.self_id) continue;
+
+                            const next_idx = self.next_index[i];
+                            const ae = types.AppendEntries{
+                                .term = self.current_term,
+                                .leader_id = self.config.self_id,
+                                .prev_log_index = next_idx - 1,
+                                .prev_log_term = self.log.termAt(next_idx - 1) orelse 0,
+                                .entries = self.log.sliceFrom(next_idx),
+                                .leader_commit = self.commit_index,
+                            };
+
+                            //TODO
+                            _ = cluster.sendMessage(follower.config.self_id, .{ .AppendEntries = ae }) catch {
+                                std.debug.print("Failed to send sendMessage to node {}\n", .{follower.config.self_id});
+
+                            };
+                        }
+                    }
+                }
+            } else {
+                // Step back and retry
+                if (self.next_index[follower_index] > 1) {
+                    self.next_index[follower_index] -= 1;
+                }
+            }
+        }
+
+        fn sendHeartbeats(self: *RaftNode(T), cluster: *Cluster(T)) void {
+            for (self.config.nodes, 0..) |node, i| {
+                if (node.id == self.config.self_id) continue;
+
+                const next_idx = self.next_index[i];
+                const prev_log_index = if (next_idx > 0) next_idx - 1 else 0;
+                const prev_log_term = self.log.termAt(prev_log_index) orelse 0;
+
+                // Fetch entries to send starting at next_idx
+                const all_entries = self.log.entries.items;
+                const to_send = if (next_idx < all_entries.len) all_entries[next_idx..] else &[_]LogEntry{};
+
+                const req = types.AppendEntries{
+                    .term = self.current_term,
+                    .leader_id = self.config.self_id,
+                    .prev_log_index = prev_log_index,
+                    .prev_log_term = prev_log_term,
+                    .entries = @constCast(to_send), // heartbeat → no new entries
+                    .leader_commit = self.commit_index,
+                };
+
+                const msg = types.RpcMessage{ .AppendEntries = req };
+
+                // Send to the target node
+                _ = cluster.sendMessage(node.id, msg) catch {
+                    std.debug.print("Failed to send AppendEntries to node {}\n", .{node.id});
+                };
+            }
+        }
+
+        fn updateTermIfNeeded(self: *RaftNode(T), new_term: u64) void {
+            if (new_term > self.current_term) {
+                self.current_term = new_term;
+                self.state = .Follower;
+                self.voted_for = null;
+                // Reset election timeout
+                self.resetElectionTimeout();
+            }
+        }
+
+        fn findNodeIndex(self: *RaftNode(T), node_id: NodeId) ?usize {
+            for (self.config.nodes, 0..) |node, i| {
+                if (node.id == node_id) return i;
+            }
+            return null;
+        }
+
+        pub fn handleClientCommand(self: *RaftNode(T), command: []const u8) !void {
+            if (self.state != .Leader) {
+                return error.NotLeader;
+            }
+
+            const entry = LogEntry{
+                .term = self.current_term,
+                .command = try self.allocator.dupe(u8, command),
+            };
+
+            try self.log.append(entry);
+
+            // After append, update own match_index and next_index accordingly
+            const my_index = self.log.len(); // one-based
+            const my_log_index = my_index - 1;
+
+            self.match_index[self.findNodeIndex(self.config.self_id).?] = my_log_index;
+            self.next_index[self.findNodeIndex(self.config.self_id).?] = my_log_index + 1;
+        }
+
+        pub fn submitCommand(self: *RaftNode(T), command: Command) !void {
+            if (self.role != .Leader) {
+                return error.NotLeader;
+            }
+
+            const entry = LogEntry{
+                .term = self.current_term,
+                .command = command,
+            };
+
+            try self.log.append(entry);
+
+            // (optional) Immediately replicate, or wait until next heartbeat
+            //  self.broadcastAppendEntriesNow = true;
+        }
+
+        fn becomeLeader(self: *RaftNode(T), cluster: *Cluster(T)) !void {
+            const count = cluster.nodes.items.len;
+
+            self.next_index = try self.allocator.alloc(usize, count);
+            self.match_index = try self.allocator.alloc(usize, count);
+
+            for (cluster.nodes.items, 0..) |node, i| {
+                try self.node_id_to_index.put(node.config.self_id, i);
+                self.next_index[i] = self.log.lastIndex() + 1;
+                self.match_index[i] = 0;
+            }
+
+            self.sendHeartbeats(cluster);
+        }
+    };
+}
+
+pub fn Cluster(comptime T: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        nodes: std.ArrayList(*RaftNode(T)),
+        const Self = @This();
+
+        pub fn init(allocator: std.mem.Allocator) @This() {
+            return Self {
+                .allocator = allocator,
+                .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
+            };
+        }
+
+        pub fn addNode(self: *Self, node: *RaftNode(T)) !void {
+            try self.nodes.append(node);
+        }
+
+        pub fn sendMessage(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
+            for (self.nodes.items) |node| {
+                if (node.config.self_id == to_id) {
+                    try node.enqueueMessage(msg);
+                    return;
+                }
+            }
+            // Node not found — ignore or log error
+        }
+
+        pub fn broadcastMessage(self: *Self, from_id: NodeId, msg: RpcMessage) !void {
+            for (self.nodes.items) |node| {
+                if (node.config.self_id != from_id) {
+                    try node.enqueueMessage(msg);
+                }
+            }
+        }
+
+        pub fn tick(self: *Self) !void {
+            for (self.nodes.items) |node| {
+                node.tick(self);
+            }
+
+            //TODO: merge the loops
+            for (self.nodes.items) |node| {
+                try node.processMessages(self);
+            }
+        }
+    };
+}
