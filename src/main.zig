@@ -9,7 +9,6 @@ const MySM = struct {
     }
 };
 
-
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 

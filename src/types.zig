@@ -38,8 +38,8 @@ pub const RequestVote = struct {
 pub const AppendEntriesResponse = struct {
     term: Term,
     success: bool,
-    match_index: usize,       // index of the last log entry known to be replicated on follower (if success)
-    follower_id: NodeId,      // so the leader knows who sent this
+    match_index: usize, // index of the last log entry known to be replicated on follower (if success)
+    follower_id: NodeId, // so the leader knows who sent this
 };
 
 pub const RequestVoteResponse = struct {

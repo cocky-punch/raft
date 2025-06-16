@@ -10,7 +10,6 @@ const LogEntry = @import("log_entry.zig").LogEntry;
 const ElectionTimeoutBase: u64 = 150;
 const ElectionTimeoutJitter: u64 = 150;
 
-
 pub fn RaftNode(comptime T: type) type {
     return struct {
         config: types.RaftConfig,
@@ -26,8 +25,8 @@ pub fn RaftNode(comptime T: type) type {
         total_votes: usize,
         election_deadline_ms: u64, // timestamp in ms when election timeout expires
         commit_index: usize,
-        next_index: []usize,   // for each follower: index of the next log entry to send
-        match_index: []usize,  // for each follower: highest log entry known to be replicated
+        next_index: []usize, // for each follower: index of the next log entry to send
+        match_index: []usize, // for each follower: highest log entry known to be replicated
         node_id_to_index: std.AutoHashMap(NodeId, usize),
         last_applied: usize = 0,
 
@@ -39,7 +38,7 @@ pub fn RaftNode(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
             const nodes = std.ArrayList(types.Node).init(allocator);
-            return Self {
+            return Self{
                 .allocator = allocator,
                 .state = .Follower,
                 .current_term = 0,
@@ -54,7 +53,7 @@ pub fn RaftNode(comptime T: type) type {
                 .match_index = &[_]usize{},
                 .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
                 .log = Log.init(allocator),
-                .config = types.RaftConfig {
+                .config = types.RaftConfig{
                     .self_id = id,
                     .nodes = nodes.items,
                 },
@@ -90,7 +89,7 @@ pub fn RaftNode(comptime T: type) type {
                     .last_log_term = last_log_term,
                 };
 
-                _ = cluster.sendMessage(node.id, RpcMessage {.RequestVote = req}) catch {
+                _ = cluster.sendMessage(node.id, RpcMessage{ .RequestVote = req }) catch {
                     std.debug.print("Failed to send RequestVote to: {}\n", .{node.id});
                 };
             }
@@ -152,7 +151,6 @@ pub fn RaftNode(comptime T: type) type {
                 entry.command,
             });
 
-
             //TODO
             // while (self.last_applied < self.commit_index) {
             //     self.last_applied += 1;
@@ -182,8 +180,8 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         pub fn enqueueMessage(self: *RaftNode(T), msg: RpcMessage) !void {
-                try self.inbox.append(msg);
-            }
+            try self.inbox.append(msg);
+        }
 
         pub fn processMessages(self: *RaftNode(T), cluster: *Cluster(T)) !void {
             while (self.inbox.items.len > 0) {
@@ -256,7 +254,6 @@ pub fn RaftNode(comptime T: type) type {
             };
         }
 
-
         fn handleAppendEntries(self: *RaftNode(T), req: types.AppendEntries, cluster: *Cluster(T)) void {
             if (req.term < self.current_term) {
                 const resp = types.AppendEntriesResponse{
@@ -266,17 +263,19 @@ pub fn RaftNode(comptime T: type) type {
                     .match_index = 0,
                 };
 
-                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
+                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {
+                    std.debug.print("Failed to send AppendEntriesResponse to node_id: {}\n", .{req.leader_id});
+                };
                 return;
             }
 
             // If term is greater, step down
             if (req.term > self.current_term) {
                 self.current_term = req.term;
-                self.voted_for = null;
                 self.becomeFollower();
             } else {
-                self.resetElectionTimeout();
+                //TODO
+                // self.resetElectionTimeout();
             }
 
             // Log consistency check
@@ -289,7 +288,10 @@ pub fn RaftNode(comptime T: type) type {
                     .match_index = 0,
                 };
 
-                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
+                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {
+                    std.debug.print("Failed to send AppendEntriesResponse to node_id: {}\n", .{req.leader_id});
+                };
+
                 return;
             }
 
@@ -302,8 +304,9 @@ pub fn RaftNode(comptime T: type) type {
                 if (existing == null or existing.?.term != req.entries[i].term) {
                     // Truncate and append
                     self.log.truncate(index);
-                    // _ = self.log.appendSlice(req.entries[i..]) catch {};
-                    _ = self.log.entries.appendSlice(req.entries[i..]) catch {};
+                    _ = self.log.entries.appendSlice(req.entries[i..]) catch {
+                        std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
+                    };
                     break;
                 }
 
@@ -338,9 +341,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        fn handleRequestVoteResponse(self: *RaftNode(T), resp: types.RequestVoteResponse,
-            cluster: *Cluster(T)
-        ) void {
+        fn handleRequestVoteResponse(self: *RaftNode(T), resp: types.RequestVoteResponse, cluster: *Cluster(T)) void {
             if (self.state != .Candidate) return;
 
             if (resp.term > self.current_term) {
@@ -363,10 +364,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-
-        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: types.AppendEntriesResponse,
-            cluster: *Cluster(T)
-        ) void {
+        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: types.AppendEntriesResponse, cluster: *Cluster(T)) void {
             if (resp.term > self.current_term) {
                 self.current_term = resp.term;
                 self.becomeFollower();
@@ -395,16 +393,16 @@ pub fn RaftNode(comptime T: type) type {
                     {
                         self.commit_index = new_commit_index;
 
-
                         // Apply committed entries
                         _ = self.applyCommitted();
 
                         // Broadcast updated commit index to others
-                        // FIXME: i
-                        for (cluster.nodes.items, 0..) |follower, i| {
+                        for (cluster.nodes.items) |follower| {
                             if (follower.config.self_id == self.config.self_id) continue;
 
-                            const next_idx = self.next_index[i];
+                            const idx = self.node_id_to_index.get(follower.config.self_id) orelse continue;
+                            const next_idx = self.next_index[idx];
+
                             const ae = types.AppendEntries{
                                 .term = self.current_term,
                                 .leader_id = self.config.self_id,
@@ -414,10 +412,8 @@ pub fn RaftNode(comptime T: type) type {
                                 .leader_commit = self.commit_index,
                             };
 
-                            //TODO
                             _ = cluster.sendMessage(follower.config.self_id, .{ .AppendEntries = ae }) catch {
                                 std.debug.print("Failed to send sendMessage to node {}\n", .{follower.config.self_id});
-
                             };
                         }
                     }
@@ -537,7 +533,7 @@ pub fn Cluster(comptime T: type) type {
         const Self = @This();
 
         pub fn init(allocator: std.mem.Allocator) @This() {
-            return Self {
+            return Self{
                 .allocator = allocator,
                 .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
             };

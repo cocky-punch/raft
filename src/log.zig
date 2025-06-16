@@ -1,13 +1,12 @@
 const std = @import("std");
 const LogEntry = @import("log_entry.zig").LogEntry;
 
-
 pub const Log = struct {
     allocator: std.mem.Allocator,
     entries: std.ArrayList(LogEntry),
 
     pub fn init(allocator: std.mem.Allocator) Log {
-        return Log {
+        return Log{
             .allocator = allocator,
             .entries = std.ArrayList(LogEntry).init(allocator),
         };
