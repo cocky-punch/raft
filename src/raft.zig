@@ -33,6 +33,7 @@ pub fn RaftNode(comptime T: type) type {
         // state_machine: anytype,
         // state_machine: ?*T,
         state_machine: ?StateMachine(T) = null,
+        snapshot: ?types.Snapshot = null,
 
         const Self = @This();
 
@@ -521,6 +522,43 @@ pub fn RaftNode(comptime T: type) type {
 
             self.sendHeartbeats(cluster);
         }
+
+        fn createSnapshot(self: *RaftNode(T)) !void {
+            const last_index = self.last_applied;
+
+            // 1. Serialize state machine to bytes
+            var buffer = std.ArrayList(u8).init(self.allocator);
+            defer buffer.deinit();
+            try self.state_machine.ctx.serialize(&buffer); // assumes your state machine supports this
+
+            // 2. Save snapshot
+            self.snapshot = types.Snapshot{
+                .last_included_index = last_index,
+                .last_included_term = self.log.termAt(last_index - 1).?,
+                .state_data = try self.allocator.dupe(u8, buffer.items),
+            };
+
+            // 3. Truncate log
+            try self.log.truncatePrefix(last_index);
+        }
+
+        fn installSnapshot(self: *RaftNode(T), snap: types.Snapshot) !void {
+            // Step down if term is older
+            self.state = .Follower;
+            self.current_term = @max(self.current_term, snap.last_included_term);
+            self.voted_for = null;
+            self.resetElectionTimeout();
+
+            // Restore state
+            try self.state_machine.ctx.deserialize(snap.state_data);
+
+            // Update log
+            try self.log.replaceWithSnapshotPoint(snap.last_included_index, snap.last_included_term);
+
+            self.last_applied = snap.last_included_index;
+            self.commit_index = snap.last_included_index;
+        }
+
     };
 }
 

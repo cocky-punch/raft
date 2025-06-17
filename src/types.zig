@@ -72,3 +72,9 @@ pub const RpcMessage = union(enum) {
     InstallSnapshotResponse: InstallSnapshotResponse,
     TimeoutNow: struct {},
 };
+
+pub const Snapshot = struct {
+    last_included_index: usize,
+    last_included_term: usize,
+    state_data: []u8, // raw bytes representing the state machine
+};
