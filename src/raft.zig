@@ -34,6 +34,8 @@ pub fn RaftNode(comptime T: type) type {
         // state_machine: ?*T,
         state_machine: ?StateMachine(T) = null,
         snapshot: ?types.Snapshot = null,
+        snapshot_index: usize = 0,
+        snapshot_term: u64 = 0,
 
         const Self = @This();
 
@@ -199,7 +201,9 @@ pub fn RaftNode(comptime T: type) type {
                             self.handleAppendEntriesResponse(resp, cluster);
                         },
 
-                        RpcMessage.InstallSnapshot => |_| {},
+                        RpcMessage.InstallSnapshot => |resp| {
+                            try self.installSnapshot(resp, cluster);
+                        },
                         RpcMessage.InstallSnapshotResponse => |_| {},
                         RpcMessage.TimeoutNow => |_| {},
                     }
@@ -542,23 +546,38 @@ pub fn RaftNode(comptime T: type) type {
             try self.log.truncatePrefix(last_index);
         }
 
-        fn installSnapshot(self: *RaftNode(T), snap: types.Snapshot) !void {
-            // Step down if term is older
+        fn installSnapshot(self: *RaftNode(T), snap: types.InstallSnapshot, cluster: *Cluster(T)) !void {
+            if (snap.term < self.current_term) return;
+
             self.state = .Follower;
-            self.current_term = @max(self.current_term, snap.last_included_term);
+            self.current_term = snap.term;
             self.voted_for = null;
             self.resetElectionTimeout();
 
-            // Restore state
-            try self.state_machine.ctx.deserialize(snap.state_data);
+            // Discard old log entries
+            self.log.truncate(snap.last_included_index + 1);
+
+            // Set snapshot point
+            self.snapshot_index = snap.last_included_index;
+            self.snapshot_term = snap.last_included_term;
+
+            // Deserialize snapshot into state machine
+            try self.state_machine.?.deserialize(snap.data);
 
             // Update log
             try self.log.replaceWithSnapshotPoint(snap.last_included_index, snap.last_included_term);
-
-            self.last_applied = snap.last_included_index;
             self.commit_index = snap.last_included_index;
-        }
+            self.last_applied = snap.last_included_index;
 
+            const resp = types.RpcMessage{
+                .InstallSnapshotResponse = types.InstallSnapshotResponse{
+                    .term = self.current_term,
+                    .follower_id = self.config.self_id,
+                    .success = true
+                },
+            };
+            try cluster.sendMessage(snap.leader_id, resp);
+        }
     };
 }
 

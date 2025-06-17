@@ -5,6 +5,10 @@ pub const Log = struct {
     allocator: std.mem.Allocator,
     entries: std.ArrayList(LogEntry),
 
+    //TODO
+    base_index: u64 = 0,
+    base_term: u64 = 0,
+
     pub fn init(allocator: std.mem.Allocator) Log {
         return Log{
             .allocator = allocator,
@@ -47,5 +51,29 @@ pub const Log = struct {
     pub fn sliceFrom(self: *Log, from_idx: usize) []LogEntry {
         if (from_idx > self.entries.items.len) return &[_]LogEntry{};
         return self.entries.items[from_idx..];
+    }
+
+    pub fn replaceWithSnapshotPoint(self: *Log, index: usize, term: usize) !void {
+        if (index < self.base_index or index > self.lastIndex()) {
+            return error.InvalidSnapshotIndex;
+        }
+
+        const pos = index - self.base_index;
+        if (pos > self.entries.items.len) {
+            return error.InvalidSnapshotIndex;
+        }
+
+        const remaining = self.entries.items[pos..];
+        var new_entries = try std.ArrayListAligned(LogEntry, null).initCapacity(
+            self.entries.allocator,
+            remaining.len,
+        );
+        try new_entries.appendSlice(remaining);
+
+        self.entries.deinit();
+        self.entries = new_entries;
+
+        self.base_index = index;
+        self.base_term = term;
     }
 };
