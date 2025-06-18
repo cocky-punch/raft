@@ -204,8 +204,42 @@ pub fn RaftNode(comptime T: type) type {
                         RpcMessage.InstallSnapshot => |resp| {
                             try self.installSnapshot(resp, cluster);
                         },
-                        RpcMessage.InstallSnapshotResponse => |_| {},
-                        RpcMessage.TimeoutNow => |_| {},
+                        RpcMessage.InstallSnapshotResponse => |resp| {
+                            if (self.state != .Leader) return;
+
+                            const follower_idx = self.node_id_to_index.get(resp.follower_id) orelse return;
+
+                            // follower is up to date with snapshot index; set next_index and match_index accordingly
+                            const new_index = self.snapshot_index + 1;
+                            self.next_index[follower_idx] = new_index;
+                            self.match_index[follower_idx] = self.snapshot_index;
+
+
+                            // trigger a commit check here if needed
+                            // Copy match_index into a temp array
+                            const temp = try self.allocator.alloc(usize, self.match_index.len);
+                            defer self.allocator.free(temp);
+                            @memcpy(temp, self.match_index);
+
+                            std.mem.sort(usize, temp, {}, comptime std.sort.desc(usize));
+                            const majority_idx = temp[@divFloor(temp.len, 2)];
+
+                            if (majority_idx > self.commit_index) {
+                                const term_at = self.log.termAt(majority_idx);
+                                if (term_at) |term_at_val| {
+                                    if (term_at_val == self.current_term) {
+                                        self.commit_index = majority_idx;
+                                        self.applyCommitted(); // Applies entries up to commit_index
+                                    }
+                                }
+                            }
+                        },
+                        RpcMessage.TimeoutNow => |_| {
+                            if (self.state == .Follower) {
+                                std.debug.print("Received TimeoutNow, starting election early...\n", .{});
+                                self.startElection(cluster);
+                            }
+                        },
                     }
                 } else {
                     break;
@@ -570,11 +604,7 @@ pub fn RaftNode(comptime T: type) type {
             self.last_applied = snap.last_included_index;
 
             const resp = types.RpcMessage{
-                .InstallSnapshotResponse = types.InstallSnapshotResponse{
-                    .term = self.current_term,
-                    .follower_id = self.config.self_id,
-                    .success = true
-                },
+                .InstallSnapshotResponse = types.InstallSnapshotResponse{ .term = self.current_term, .follower_id = self.config.self_id, .success = true },
             };
             try cluster.sendMessage(snap.leader_id, resp);
         }
