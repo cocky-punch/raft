@@ -114,12 +114,7 @@ pub fn RaftNode(comptime T: type) type {
 
             // Handle state-specific periodic work
             switch (self.state) {
-                .Follower => {
-                    if (now >= self.election_deadline_ms) {
-                        self.startElection(cluster);
-                    }
-                },
-                .Candidate => {
+                .Follower, .Candidate => {
                     if (now >= self.election_deadline_ms) {
                         self.startElection(cluster);
                     }
@@ -154,7 +149,7 @@ pub fn RaftNode(comptime T: type) type {
         fn becomeCandidate(self: *RaftNode(T)) void {
             self.state = .Candidate;
             self.current_term += 1;
-            self.voted_for = self.id;
+            self.voted_for = self.config.self_id;
             self.resetElectionTimeout();
             // Send RequestVote to other nodes (to be implemented)
         }
@@ -205,7 +200,6 @@ pub fn RaftNode(comptime T: type) type {
                             self.next_index[follower_idx] = new_index;
                             self.match_index[follower_idx] = self.snapshot_index;
 
-
                             // trigger a commit check here if needed
                             // Copy match_index into a temp array
                             const temp = try self.allocator.alloc(usize, self.match_index.len);
@@ -233,6 +227,7 @@ pub fn RaftNode(comptime T: type) type {
                         },
                     }
                 } else {
+                    //TODO
                     break;
                 }
             }
@@ -489,7 +484,6 @@ pub fn RaftNode(comptime T: type) type {
                 self.current_term = new_term;
                 self.state = .Follower;
                 self.voted_for = null;
-                // Reset election timeout
                 self.resetElectionTimeout();
             }
         }
