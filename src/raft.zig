@@ -65,14 +65,9 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         fn startElection(self: *RaftNode(T), cluster: *Cluster(T)) void {
-            self.state = .Candidate;
-            self.current_term += 1;
-            self.voted_for = self.config.self_id;
+            self.becomeCandidate();
             self.votes_received = 1; // vote for self
             self.total_votes = self.config.nodes.len;
-
-            // Reset election timeout here if there's one
-            self.resetElectionTimeout();
 
             // Determine last log index and term
             const last_log_index =
@@ -122,13 +117,9 @@ pub fn RaftNode(comptime T: type) type {
                 .Follower => {
                     if (now >= self.election_deadline_ms) {
                         self.startElection(cluster);
-
-                        //TODO
-                        //self.becomeCandidate();
                     }
                 },
                 .Candidate => {
-                    // If election timeout expired, start new election (with jitter/backoff if you want)
                     if (now >= self.election_deadline_ms) {
                         self.startElection(cluster);
                     }

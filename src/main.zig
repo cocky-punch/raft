@@ -35,7 +35,9 @@ pub fn main() !void {
 
     const tick_interval = 50; // milliseconds
     while (true) {
-        std.time.sleep(tick_interval * std.time.ns_per_ms);
         try cluster.tick();
+        // try node.processMessages(&cluster);
+
+        std.time.sleep(tick_interval * std.time.ns_per_ms);
     }
 }
