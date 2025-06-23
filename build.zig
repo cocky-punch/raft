@@ -42,14 +42,14 @@ pub fn build(b: *std.Build) void {
     // Modules can depend on one another using the `std.Build.Module.addImport` function.
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
-    exe_mod.addImport("raft_zg_lib", lib_mod);
+    exe_mod.addImport("raft_lib", lib_mod);
 
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
     // for actually invoking the compiler.
     const lib = b.addLibrary(.{
         .linkage = .static,
-        .name = "raft_zg",
+        .name = "raft",
         .root_module = lib_mod,
     });
 
@@ -61,7 +61,7 @@ pub fn build(b: *std.Build) void {
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
     const exe = b.addExecutable(.{
-        .name = "raft_zg",
+        .name = "raft",
         .root_module = exe_mod,
     });
 
@@ -106,6 +106,14 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
+    const test_step2 = b.addTest(.{
+        .name = "raft_test",
+        .root_source_file = b.path("src/raft_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.default_step.dependOn(&test_step2.step);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request

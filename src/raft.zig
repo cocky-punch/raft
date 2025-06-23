@@ -21,6 +21,7 @@ pub fn RaftNode(comptime T: type) type {
         election_deadline: u64, // ms timestamp
 
         inbox: std.ArrayList(RpcMessage),
+        nodes_buffer: std.ArrayList(types.Node),
         votes_received: usize,
         total_votes: usize,
         election_deadline_ms: u64, // timestamp in ms when election timeout expires
@@ -56,12 +57,19 @@ pub fn RaftNode(comptime T: type) type {
                 .match_index = &[_]usize{},
                 .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
                 .log = Log.init(allocator),
+                .nodes_buffer = nodes,
+                .state_machine = sm,
                 .config = types.RaftConfig{
                     .self_id = id,
                     .nodes = nodes.items,
                 },
-                .state_machine = sm,
             };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.node_id_to_index.deinit();
+            self.inbox.deinit();
+            self.nodes_buffer.deinit();
         }
 
         fn startElection(self: *RaftNode(T), cluster: *Cluster(T)) void {
@@ -160,7 +168,7 @@ pub fn RaftNode(comptime T: type) type {
             self.resetElectionTimeout();
         }
 
-        fn resetElectionTimeout(self: *RaftNode(T)) void {
+        pub fn resetElectionTimeout(self: *RaftNode(T)) void {
             const jitter = @mod(std.crypto.random.int(u64), ElectionTimeoutJitter);
             const now_ms: u64 = @intCast(std.time.milliTimestamp()); // safe since time is positive
             self.election_deadline = now_ms + ElectionTimeoutBase + jitter;
@@ -607,6 +615,11 @@ pub fn Cluster(comptime T: type) type {
                 .allocator = allocator,
                 .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
             };
+        }
+
+        pub fn deinit(self: *Self) void {
+            // Assuming Cluster does not own RaftNode(T) memory
+            self.nodes.deinit();
         }
 
         pub fn addNode(self: *Self, node: *RaftNode(T)) !void {
