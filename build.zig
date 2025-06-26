@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
     exe_mod.addImport("raft_lib", lib_mod);
 
+    const yaml_dep = b.dependency("yaml", .{ .target = target, .optimize = optimize });
+    exe_mod.addImport("yaml", yaml_dep.module("yaml"));
+
+
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
     // for actually invoking the compiler.

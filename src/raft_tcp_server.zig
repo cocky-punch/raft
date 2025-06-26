@@ -30,17 +30,35 @@ pub fn RaftTcpServer(comptime T: type) type {
         }
 
         fn handleIncomingConnection(self: *Self, stream: std.net.Stream) !void {
-            const reader = stream.reader();
-            const writer = stream.writer();
+            // const reader = stream.reader();
+            // const writer = stream.writer();
 
-            // Deserialize incoming RpcMessage
-            const msg = try RpcMessage.deserialize(reader); // you'd need to define this
+            // // Deserialize incoming RpcMessage
+            // const msg = try RpcMessage.deserialize(reader); // you'd need to define this
 
-            // Route to node
-            try self.node.enqueueMessage(msg);
+            // // Route to node
+            // try self.node.enqueueMessage(msg);
 
-            // Optional: send a response or ack if needed
-            // writer.writeAll(...) if protocol requires it
+            // // Optional: send a response or ack if needed
+            // // writer.writeAll(...) if protocol requires it
+            //
+
+
+
+            const msg = try RpcMessage.deserialize(stream.reader());
+                switch (msg) {
+                    .ClientCommand => |cmd| {
+                        if (self.node.state == .Leader) {
+                            try self.node.handleClientCommand(cmd);
+                        } else {
+                            const leader_id = self.node.leader_id orelse return;
+                            const addr = try self.cluster.node_addresses.get(leader_id) orelse return;
+                            var fallback: RpcMessage = .Redirect{ .to = leader_id };
+                            try self.cluster.sendRpc(leader_id, fallback);
+                        }
+                    },
+                    else => try self.node.enqueueMessage(msg),
+                }
         }
     };
 }
