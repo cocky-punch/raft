@@ -7,6 +7,7 @@ const RpcMessage = types.RpcMessage;
 const Log = @import("log.zig").Log;
 const Command = @import("command.zig").Command;
 const LogEntry = @import("log_entry.zig").LogEntry;
+const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
 const ElectionTimeoutBase: u64 = 150;
 const ElectionTimeoutJitter: u64 = 150;
 
@@ -608,12 +609,15 @@ pub fn Cluster(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
         nodes: std.ArrayList(*RaftNode(T)),
+        node_addresses: std.AutoHashMap(NodeId, types.PeerAddress),
+
         const Self = @This();
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return Self{
                 .allocator = allocator,
                 .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
+                .node_addresses = std.AutoHashMap(NodeId, types.PeerAddress).init(allocator),
             };
         }
 
@@ -624,6 +628,10 @@ pub fn Cluster(comptime T: type) type {
 
         pub fn addNode(self: *Self, node: *RaftNode(T)) !void {
             try self.nodes.append(node);
+        }
+
+        pub fn addNodeAddress(self: *Self, id: NodeId, addr: types.PeerAddress) !void {
+            try self.node_addresses.put(id, addr);
         }
 
         pub fn sendMessage(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
@@ -653,6 +661,15 @@ pub fn Cluster(comptime T: type) type {
             for (self.nodes.items) |node| {
                 try node.processMessages(self);
             }
+        }
+
+        //TODO
+        pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
+            const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
+            const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
+            defer stream.close();
+
+            try msg.serialize(stream.writer());
         }
     };
 }

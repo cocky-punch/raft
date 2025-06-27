@@ -78,3 +78,8 @@ pub const Snapshot = struct {
     last_included_term: usize,
     state_data: []u8, // raw bytes representing the state machine
 };
+
+pub const PeerAddress = struct {
+    ip: []const u8,
+    port: u16,
+};

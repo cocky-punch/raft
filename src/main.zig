@@ -1,7 +1,12 @@
 const std = @import("std");
 const raft = @import("raft.zig");
+const yaml = @import("yaml");
+const c = @import("config.zig");
+const Config = c.Config;
+const Peer = c.Peer;
 const RaftNode = raft.RaftNode;
 const LogEntry = @import("log_entry.zig").LogEntry;
+
 const MySM = struct {
     pub fn apply(self: *MySM, entry: LogEntry) void {
         std.debug.print("Applying entry: {}\n", .{entry});
@@ -32,6 +37,25 @@ pub fn main() !void {
     try cluster.addNode(&node1);
     try cluster.addNode(&node2);
     try cluster.addNode(&node3);
+
+    //
+    //TODO real network transport
+    const source = try std.fs.cwd().readFileAlloc(allocator, "config.yaml", 1024);
+    defer allocator.free(source);
+
+    var y = yaml.Yaml{ .source = source };
+    defer y.deinit(allocator);
+
+    try y.load(allocator);
+    const cfg = try y.parse(allocator, Config);
+    // defer cfg.deinit(allocator);
+
+    // var cluster = Cluster(AnyType).init(allocator);
+    for (cfg.peers) |p| {
+        // try cluster.node_addresses.put(p.id, p);
+        std.debug.print("p: {}\n", .{p});
+    }
+    //
 
     const tick_interval = 50; // milliseconds
     while (true) {

@@ -44,10 +44,6 @@ pub fn build(b: *std.Build) void {
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
     exe_mod.addImport("raft_lib", lib_mod);
 
-    const yaml_dep = b.dependency("yaml", .{ .target = target, .optimize = optimize });
-    exe_mod.addImport("yaml", yaml_dep.module("yaml"));
-
-
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
     // for actually invoking the compiler.
@@ -104,10 +100,28 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-
     const exe_unit_tests = b.addTest(.{
         .root_module = exe_mod,
     });
+
+    //
+    //dependencies
+    //
+
+    //yaml
+    // const yaml_dep = b.dependency("yaml", .{ .target = target, .optimize = optimize });
+    // exe_mod.addImport("yaml", yaml_dep.module("yaml"));
+    //
+    // add that code after "b.installArtifact(exe)" line
+    const yaml = b.dependency("yaml", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("yaml", yaml.module("yaml"));
+
+    //
+    //tests
+    //
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
     const test_step2 = b.addTest(.{
