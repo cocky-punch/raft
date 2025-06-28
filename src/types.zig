@@ -71,6 +71,16 @@ pub const RpcMessage = union(enum) {
     InstallSnapshot: InstallSnapshot,
     InstallSnapshotResponse: InstallSnapshotResponse,
     TimeoutNow: struct {},
+
+    pub fn serialize(self: RpcMessage, writer: anytype) !void {
+        try std.json.stringify(self, .{}, writer);
+    }
+
+    pub fn deserialize(bytes: []const u8) !RpcMessage {
+        var fba = std.heap.FixedBufferAllocator.init(bytes);
+        var stream = std.json.TokenStream.init(bytes);
+        return try std.json.parse(RpcMessage, &fba.allocator, &stream, .{});
+    }
 };
 
 pub const Snapshot = struct {
@@ -82,4 +92,10 @@ pub const Snapshot = struct {
 pub const PeerAddress = struct {
     ip: []const u8,
     port: u16,
+};
+
+pub const Transport = union(enum) {
+    InMemory,
+    Tcp,
+    // Grpc.
 };
