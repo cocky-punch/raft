@@ -5,39 +5,32 @@ An implementation of Raft Consensus Algorithm in Zig
 
 ## Installation
 
-Calculate a hash:
+Fetch the master or a release
 
 ```
-zig fetch https://github.com/<this user / repo>/archive/refs/heads/master.tar.gz
+zig fetch --save https://github.com/cocky-punch/raft/archive/refs/heads/master.tar.gz
+# or by a release version
+# zig fetch --save https://github.com/cocky-punch/raft/archive/refs/tags/[RELEASE_VERSION].tar.gz
 ```
+which will save a reference to the library into build.zig.zon
 
-### Add to build.zig.zon
-
-```
-.{
-    .name = "your_project123",
-    .version = "0.1.0",
-    .dependencies = .{
-        .raft = .{
-            .url = "https://github.com/<this user / repo>/archive/refs/heads/master.tar.gz",
-            .hash = "<INSERT_HASH_HERE>",
-        },
-    },
-}
-```
-
-Import it into your build.zig:
+Then add this into build.zig
 
 ```
-const raft_dep = b.dependency("raft", .{});
-exe.addModule("raft", raft_dep.module("raft"));
+// after "b.installArtifact(exe)" line
+const raft = b.dependency("raft", .{
+  .target = target,
+  .optimize = optimize,
+});
+exe.root_module.addImport("raft", raft.module("raft"));
 ```
 
-Then in your Zig code:
+
+And in your Zig code
 
 ```
 const raft = @import("raft");
-// TODO....
+// ........
 ```
 
 ## Usage
