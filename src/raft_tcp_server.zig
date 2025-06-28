@@ -56,14 +56,58 @@ pub fn RaftTcpServer(comptime T: type) type {
 
         pub fn handleIncomingConnection(self: *Self, stream: std.net.Stream) !void {
             var reader = stream.reader();
-            var buffer = try self.allocator.alloc(u8, 4096);
+
+            // read 4-byte length prefix
+            var len_buf: [4]u8 = undefined;
+            try reader.readNoEof(&len_buf);
+            const msg_len = std.mem.readInt(u32, &len_buf, .big);
+
+            // read that many bytes
+            var buffer = try self.allocator.alloc(u8, msg_len);
             defer self.allocator.free(buffer);
 
-            // Read data from the stream and decode into RpcMessage
-            const n = try reader.readAll(buffer);
-            const msg = try RpcMessage.deserialize(buffer[0..n]);
+            // the counter has advanced its position, hence from 0 again
+            try reader.readNoEof(buffer[0..msg_len]);
+            const msg = try RpcMessage.deserialize(buffer);
 
-            try self.node.enqueueMessage(msg);
+            switch (msg) {
+                .ClientCommand => |cmd| {
+                    if (self.node.state == .Leader) {
+                        try self.node.handleClientCommand(cmd);
+                        const ack: RpcMessage = .Ack{};
+                        try sendFramedRpc(stream.writer(), ack); // reply to client
+                    } else {
+                        const leader_id = self.node.leader_id orelse return;
+                        const fallback: RpcMessage = .Redirect{ .to = leader_id };
+                        try self.cluster.sendRpc(leader_id, fallback);
+                    }
+                },
+                else => {
+                    try self.node.enqueueMessage(msg);
+                },
+            }
+        }
+
+        pub fn sendFramedRpc(
+            allocator: std.mem.Allocator,
+            writer: anytype,
+            msg: RpcMessage,
+        ) !void {
+            var msg_buf = std.ArrayList(u8).init(allocator);
+            defer msg_buf.deinit();
+
+            try msg.serialize(msg_buf.writer());
+
+            const msg_bytes = msg_buf.items;
+            const msg_len: u32 = @intCast(msg_bytes.len);
+
+            // length prefix
+            var len_buf: [4]u8 = undefined;
+            std.mem.writeInt(u32, &len_buf, msg_len, .big);
+            try writer.writeAll(&len_buf);
+
+            // actual message
+            try writer.writeAll(msg_bytes);
         }
     };
 }

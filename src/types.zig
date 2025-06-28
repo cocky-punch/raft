@@ -1,6 +1,7 @@
 const std = @import("std");
-
+const Command = @import("command.zig").Command;
 const LogEntry = @import("log_entry.zig").LogEntry;
+
 pub const Term = u64;
 pub const NodeId = u32;
 pub const Node = struct {
@@ -71,6 +72,10 @@ pub const RpcMessage = union(enum) {
     InstallSnapshot: InstallSnapshot,
     InstallSnapshotResponse: InstallSnapshotResponse,
     TimeoutNow: struct {},
+
+    ClientCommand: Command,
+    Redirect: struct { to: NodeId },
+    Ack: struct {},
 
     pub fn serialize(self: RpcMessage, writer: anytype) !void {
         try std.json.stringify(self, .{}, writer);

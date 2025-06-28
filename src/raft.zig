@@ -117,6 +117,9 @@ pub fn RaftNode(comptime T: type) type {
                         .InstallSnapshot => |_| {},
                         .InstallSnapshotResponse => |_| {},
                         .TimeoutNow => |_| {},
+                        else => {
+                            //TODO
+                        },
                     }
                 }
             }
@@ -233,6 +236,9 @@ pub fn RaftNode(comptime T: type) type {
                                 std.debug.print("Received TimeoutNow, starting election early...\n", .{});
                                 self.startElection(cluster);
                             }
+                        },
+                        else => {
+                            //TODO
                         },
                     }
                 } else {
