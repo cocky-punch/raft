@@ -2,13 +2,13 @@ const std = @import("std");
 const yaml = @import("yaml");
 const types = @import("types.zig");
 
-pub const RawPeer = struct {
+const RawPeer = struct {
     id: types.NodeId,
     ip: []const u8,
     port: u16,
 };
 
-pub const RawConfig = struct {
+const RawConfig = struct {
     self_id: types.NodeId,
     peers: []const RawPeer,
 };

@@ -23,8 +23,6 @@ pub fn main() !void {
         .apply = MySM.apply,
     };
 
-    const raft_config = try cfg.loadConfig(allocator, "raft.yaml");
-    _ = raft_config;
 
     const Node = raft.RaftNode(MySM);
     const ClusterT = raft.Cluster(MySM);
@@ -40,22 +38,19 @@ pub fn main() !void {
 
     //
     //TODO real network transport
-    // const source = try std.fs.cwd().readFileAlloc(allocator, "config.yaml", 1024);
-    // defer allocator.free(source);
-
-    // var y = yaml.Yaml{ .source = source };
-    // defer y.deinit(allocator);
-
-    // try y.load(allocator);
-    // const cfg = try y.parse(allocator, Config);
-    // // defer cfg.deinit(allocator);
-
-    // var cluster = Cluster(AnyType).init(allocator);
-    // for (cfg.peers) |p| {
-    //     // try cluster.node_addresses.put(p.id, p);
-    //     std.debug.print("p: {}\n", .{p});
-    // }
     //
+    const raft_config = try cfg.loadConfig(allocator, "example_raft.yaml");
+
+    // for (raft_config.peers) |p| {
+        // try cluster.node_addresses.put(p.id, p);
+        // std.debug.print("p: {}\n", .{p});
+    // }
+
+    for (raft_config.nodes) |nd| {
+        // try cluster.node_addresses.put(nd.id, nd);
+        std.debug.print("node: {}\n", .{nd});
+    }
+
 
     const tick_interval = 50; // milliseconds
     while (true) {

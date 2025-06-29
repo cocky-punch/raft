@@ -1,5 +1,4 @@
 const std = @import("std");
-const yaml = @import("yaml");
 const raft = @import("raft");
 
 const Allocator = std.mem.Allocator;
@@ -14,7 +13,7 @@ const MyStateMachine = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const config = try loadConfig(allocator, "raft.yaml");
+    const config = try loadConfig(allocator, "example_raft.yaml");
 
     // state machine wrapper
     var sm_impl = MyStateMachine{};
