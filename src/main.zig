@@ -1,11 +1,8 @@
 const std = @import("std");
 const raft = @import("raft.zig");
-const yaml = @import("yaml");
-const c = @import("config.zig");
-const Config = c.Config;
-const Peer = c.Peer;
 const RaftNode = raft.RaftNode;
 const LogEntry = @import("log_entry.zig").LogEntry;
+const cfg = @import("config.zig");
 
 const MySM = struct {
     pub fn apply(self: *MySM, entry: LogEntry) void {
@@ -26,6 +23,9 @@ pub fn main() !void {
         .apply = MySM.apply,
     };
 
+    const raft_config = try cfg.loadConfig(allocator, "raft.yaml");
+    _ = raft_config;
+
     const Node = raft.RaftNode(MySM);
     const ClusterT = raft.Cluster(MySM);
 
@@ -40,21 +40,21 @@ pub fn main() !void {
 
     //
     //TODO real network transport
-    const source = try std.fs.cwd().readFileAlloc(allocator, "config.yaml", 1024);
-    defer allocator.free(source);
+    // const source = try std.fs.cwd().readFileAlloc(allocator, "config.yaml", 1024);
+    // defer allocator.free(source);
 
-    var y = yaml.Yaml{ .source = source };
-    defer y.deinit(allocator);
+    // var y = yaml.Yaml{ .source = source };
+    // defer y.deinit(allocator);
 
-    try y.load(allocator);
-    const cfg = try y.parse(allocator, Config);
-    // defer cfg.deinit(allocator);
+    // try y.load(allocator);
+    // const cfg = try y.parse(allocator, Config);
+    // // defer cfg.deinit(allocator);
 
     // var cluster = Cluster(AnyType).init(allocator);
-    for (cfg.peers) |p| {
-        // try cluster.node_addresses.put(p.id, p);
-        std.debug.print("p: {}\n", .{p});
-    }
+    // for (cfg.peers) |p| {
+    //     // try cluster.node_addresses.put(p.id, p);
+    //     std.debug.print("p: {}\n", .{p});
+    // }
     //
 
     const tick_interval = 50; // milliseconds

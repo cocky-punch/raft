@@ -3,15 +3,20 @@ const Command = @import("command.zig").Command;
 const LogEntry = @import("log_entry.zig").LogEntry;
 
 pub const Term = u64;
-pub const NodeId = u32;
+pub const NodeId = u64;
+pub const PeerAddress = struct {
+    ip: []const u8,
+    port: u16,
+};
+
 pub const Node = struct {
     id: NodeId,
-    address: []const u8, // or IP/port tuple, depending on your message transport
+    address: PeerAddress,
 };
 
 pub const RaftConfig = struct {
     self_id: NodeId,
-    nodes: []const Node, // list of known peers (including self)
+    nodes: []const Node, // includes self
 };
 
 pub const RaftState = enum {
@@ -92,11 +97,6 @@ pub const Snapshot = struct {
     last_included_index: usize,
     last_included_term: usize,
     state_data: []u8, // raw bytes representing the state machine
-};
-
-pub const PeerAddress = struct {
-    ip: []const u8,
-    port: u16,
 };
 
 pub const Transport = union(enum) {
