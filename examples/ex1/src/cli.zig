@@ -1,5 +1,6 @@
 const std = @import("std");
 const raft = @import("raft");
+const types = @import("types");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -20,10 +21,10 @@ pub fn main() !void {
     var stream = try std.net.tcpConnectToHost(allocator, ip, port);
     defer stream.close();
 
-    const msg = if (std.mem.eql(u8, cmd_type, "set")) RpcMessage{
-        .ClientCommand = Command{ .Set = .{ .key = key, .value = value } },
-    } else if (std.mem.eql(u8, cmd_type, "delete")) RpcMessage{
-        .ClientCommand = Command{ .Delete = key },
+    const msg = if (std.mem.eql(u8, cmd_type, "set")) types.RpcMessage{
+        .ClientCommand = types.Command{ .Set = .{ .key = key, .value = value } },
+    } else if (std.mem.eql(u8, cmd_type, "delete")) types.RpcMessage{
+        .ClientCommand = types.Command{ .Delete = key },
     } else return error.InvalidCommand;
 
     try raft.sendFramedRpc(allocator, stream.writer(), msg);

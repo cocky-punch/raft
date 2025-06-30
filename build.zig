@@ -109,15 +109,12 @@ pub fn build(b: *std.Build) void {
     //
 
     //yaml
-    // const yaml_dep = b.dependency("yaml", .{ .target = target, .optimize = optimize });
-    // exe_mod.addImport("yaml", yaml_dep.module("yaml"));
-    //
-    // add that code after "b.installArtifact(exe)" line
-    const yaml = b.dependency("yaml", .{
+    const yaml_dep = b.dependency("yaml", .{
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("yaml", yaml.module("yaml"));
+    exe.root_module.addImport("yaml", yaml_dep.module("yaml"));
+
 
     //
     //tests

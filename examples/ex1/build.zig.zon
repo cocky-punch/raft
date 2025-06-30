@@ -1,0 +1,22 @@
+.{
+    .name = .raft_ex1,
+    .version = "0.0.1",
+    .fingerprint = 0x1f234166d9746e99,
+    .dependencies = .{
+        // .yaml = .{
+        //     .url = "https://github.com/kubkon/zig-yaml/archive/master.tar.gz",
+        // },
+        .yaml = .{
+            .url = "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.1.1.tar.gz",
+            .hash = "zig_yaml-0.1.0-C1161miEAgBCwL3YAEQZwV_4GyaaT2Xqj9nKB6hNe_TL",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        // "LICENSE",
+        // "README.md",
+    },
+}

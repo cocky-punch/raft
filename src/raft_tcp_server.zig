@@ -2,7 +2,8 @@ const std = @import("std");
 const RaftNode = @import("raft.zig").RaftNode;
 const Cluster = @import("raft.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
-const atomic = std.atomic;
+// const atomic = std.atomic;
+// const AtomicU32 = std.atomic.Atomic(u32);
 
 pub fn RaftTcpServer(comptime T: type) type {
     return struct {
@@ -10,7 +11,10 @@ pub fn RaftTcpServer(comptime T: type) type {
         node: *RaftNode(T),
         cluster: *Cluster(T),
         max_clients: usize,
-        active_clients: atomic.Int,
+        // active_clients: atomic.Int,
+        // active_clients: AtomicU32,
+        // active_clients: atomic(u32),
+        active_clients: std.atomic.Value(u32),
 
         const Self = @This();
 
@@ -20,11 +24,16 @@ pub fn RaftTcpServer(comptime T: type) type {
                 .node = node,
                 .cluster = cluster,
                 .max_clients = max_clients,
-                .active_clients = atomic.Int.init(0),
+                // .active_clients = atomic.Int.init(0),
+                // .active_clients = AtomicU32.init(0),
+                // .active_clients = atomic(u32).init(0),
+                .active_clients = std.atomic.Value(u32).init(0)
             };
         }
 
         pub fn start(self: *Self, port: u16) !void {
+
+            //FIXME
             var listener = try std.net.StreamServer.listen(.{ .port = port });
             defer listener.deinit();
 

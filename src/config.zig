@@ -1,5 +1,5 @@
 const std = @import("std");
-const yaml = @import("yaml");
+const y = @import("yaml");
 const types = @import("types.zig");
 
 const RawPeer = struct {
@@ -20,7 +20,7 @@ pub fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !types.RaftCon
     const content = try file.readToEndAlloc(allocator, 64 * 1024);
     defer allocator.free(content);
 
-    var parser = yaml.Yaml{
+    var parser = y.Yaml{
         .source = content,
     };
     defer parser.deinit(allocator);

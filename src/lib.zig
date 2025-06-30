@@ -1,3 +1,16 @@
-pub const types = @import("types.zig");
-pub const config = @import("config.zig");
-pub const raft = @import("raft.zig");
+// pub const types = @import("types.zig");
+// pub const config = @import("config.zig");
+// pub const raft = @import("raft.zig");
+
+
+pub const RaftNode = @import("raft.zig").RaftNode;
+pub const Cluster = @import("raft.zig").Cluster;
+pub const Command = @import("types.zig").Command;
+pub const RpcMessage = @import("types.zig").RpcMessage;
+
+pub const loadConfig = @import("config.zig").loadConfig;
+pub const RawConfig = @import("config.zig").RawConfig;
+pub const RawPeer = @import("config.zig").RawPeer;
+pub const StateMachine = @import("state_machine.zig").StateMachine;
+pub const LogEntry = @import("log_entry.zig").LogEntry;
+pub const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;

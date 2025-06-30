@@ -1,9 +1,0 @@
-.{
-    .name = "raft_example_1",
-    .version = "0.0.1",
-    .dependencies = .{
-        .yaml = .{
-            .url = "https://github.com/kubkon/zig-yaml/archive/master.tar.gz",
-        },
-    },
-}
