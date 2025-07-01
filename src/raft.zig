@@ -632,10 +632,12 @@ pub fn Cluster(comptime T: type) type {
             self.nodes.deinit();
         }
 
+        //for "in-memory" transport; simulation
         pub fn addNode(self: *Self, node: *RaftNode(T)) !void {
             try self.nodes.append(node);
         }
 
+        //for TCP, sockets transport; real network, distributed clusters
         pub fn addNodeAddress(self: *Self, id: NodeId, addr: types.PeerAddress) !void {
             try self.node_addresses.put(id, addr);
         }

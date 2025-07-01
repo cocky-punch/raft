@@ -2,11 +2,11 @@ const std = @import("std");
 const raft = @import("raft");
 
 const Allocator = std.mem.Allocator;
+const CLIENTS_MAX_AMOUNT = 50;
+const HEARBEAT_TICK_DURATION_IN_MS = 50;
 
 const MyStateMachine = struct {
-    // pub fn apply(self: *@This(), cmd: raft.Command) !void {
     pub fn apply(self: *MyStateMachine, cmd: raft.LogEntry) void {
-        // Apply the Raft command (e.g. Set/Delete) to your in-memory state
         std.debug.print("Applied command: {}\n", .{cmd});
         _ = self;
     }
@@ -33,39 +33,32 @@ pub fn main() !void {
 
     // Add all node IPs
     for (raft_config.nodes) |entry| {
-
-        //FIXME
-        // try cluster.registerAddress(entry.id, entry.ip, entry.port);
-        _ = entry;
+        try cluster.addNodeAddress(entry.id, entry.address);
     }
 
-    try cluster.addNode(&node);
+    // try cluster.addNode(&node);
 
-    var server = raft.RaftTcpServer(MyStateMachine){
-        .allocator = allocator,
-        .node = &node,
-        .cluster = &cluster,
-        .max_clients = 33,
-        .active_clients = std.atomic.Value(u32).init(0),
+    var server = raft.RaftTcpServer(MyStateMachine).init(
+        allocator,
+        &node,
+        &cluster,
+        CLIENTS_MAX_AMOUNT,
+    );
+
+    const self_port = blk: {
+        for (raft_config.nodes) |n| {
+            if (n.id == raft_config.self_id) break :blk n.address.port;
+        }
+        return error.SelfNodeNotInConfig;
     };
 
-    //FIXME
-    // const self_port = blk: {
-    //     for (raft_config.nodes) |n| {
-    //         if (n.id == raft_config.self_id) break :blk n.port;
-    //     }
-    //     return error.SelfNodeNotInConfig;
-    // };
-
-    // const t = try std.Thread.spawn(.{}, raft.RaftTcpServer(MyStateMachine).start, .{ &server, self_port });
-    // FIXME
-    const t = try std.Thread.spawn(.{}, raft.RaftTcpServer(MyStateMachine).start, .{ &server, 1234 });
+    const t = try std.Thread.spawn(.{}, raft.RaftTcpServer(MyStateMachine).start, .{ &server, self_port });
     t.detach();
 
     // Main loop
     while (true) {
         try cluster.tick();
-        // tick to the node every 50ms
-        std.time.sleep(50 * std.time.ns_per_ms);
+        // tick to the node every X ms
+        std.time.sleep(HEARBEAT_TICK_DURATION_IN_MS * std.time.ns_per_ms);
     }
 }

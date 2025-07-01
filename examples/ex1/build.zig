@@ -8,24 +8,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const yaml_module = yaml_dep.module("yaml");
-
     const raft_module = b.createModule(.{
         .root_source_file = b.path("../../src/lib.zig"),
         .imports = &.{
             .{ .name = "yaml", .module = yaml_module },
         },
     });
-
-    //TODO
-    // const config_module = b.createModule(.{
-    //     .root_source_file = b.path("../../src/config.zig"),
-    // });
-    // _ = config_module;
-
-    // const types_module = b.createModule(.{
-    //     .root_source_file = b.path("../../src/types.zig"),
-    // });
-    // _ = types_module;
 
     //
     //exe
@@ -55,10 +43,8 @@ pub fn build(b: *std.Build) void {
 
     cli.root_module.addImport("raft", raft_module);
 
-    //TODO
-    // b.installArtifact(cli);
-
-    // b.default_step.dependOn(&cli.step);
-    // const run_cli = b.addRunArtifact(cli);
-    // b.step("run-cli", "Run raft_cli binary").dependOn(&run_cli.step);
+    b.installArtifact(cli);
+    b.default_step.dependOn(&cli.step);
+    const run_cli = b.addRunArtifact(cli);
+    b.step("run-cli", "Run raft_cli binary").dependOn(&run_cli.step);
 }

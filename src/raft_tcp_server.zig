@@ -14,13 +14,7 @@ pub fn RaftTcpServer(comptime T: type) type {
         const Self = @This();
 
         pub fn init(allocator: std.mem.Allocator, node: *RaftNode(T), cluster: *Cluster(T), max_clients: usize) Self {
-            return Self{
-                .allocator = allocator,
-                .node = node,
-                .cluster = cluster,
-                .max_clients = max_clients,
-                .active_clients = 0,
-            };
+            return Self{ .allocator = allocator, .node = node, .cluster = cluster, .max_clients = max_clients, .active_clients = std.atomic.Value(u32).init(0) };
         }
 
         pub fn start(self: *Self, port: u16) !void {
@@ -110,27 +104,23 @@ pub fn RaftTcpServer(comptime T: type) type {
                 },
             }
         }
-
-        pub fn sendFramedRpc(
-            allocator: std.mem.Allocator,
-            writer: anytype,
-            msg: RpcMessage,
-        ) !void {
-            var msg_buf = std.ArrayList(u8).init(allocator);
-            defer msg_buf.deinit();
-
-            try msg.serialize(msg_buf.writer());
-
-            const msg_bytes = msg_buf.items;
-            const msg_len: u32 = @intCast(msg_bytes.len);
-
-            // length prefix
-            var len_buf: [4]u8 = undefined;
-            std.mem.writeInt(u32, &len_buf, msg_len, .big);
-            try writer.writeAll(&len_buf);
-
-            // actual message
-            try writer.writeAll(msg_bytes);
-        }
     };
+}
+
+pub fn sendFramedRpc(allocator: std.mem.Allocator, writer: anytype, msg: RpcMessage) !void {
+    var msg_buf = std.ArrayList(u8).init(allocator);
+    defer msg_buf.deinit();
+
+    try msg.serialize(msg_buf.writer());
+
+    const msg_bytes = msg_buf.items;
+    const msg_len: u32 = @intCast(msg_bytes.len);
+
+    // length prefix
+    var len_buf: [4]u8 = undefined;
+    std.mem.writeInt(u32, &len_buf, msg_len, .big);
+    try writer.writeAll(&len_buf);
+
+    // actual message
+    try writer.writeAll(msg_bytes);
 }
