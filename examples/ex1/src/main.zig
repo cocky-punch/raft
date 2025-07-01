@@ -36,8 +36,6 @@ pub fn main() !void {
         try cluster.addNodeAddress(entry.id, entry.address);
     }
 
-    // try cluster.addNode(&node);
-
     var server = raft.RaftTcpServer(MyStateMachine).init(
         allocator,
         &node,

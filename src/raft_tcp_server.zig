@@ -77,22 +77,14 @@ pub fn RaftTcpServer(comptime T: type) type {
             switch (msg) {
                 .ClientCommand => |cmd| {
                     if (self.node.state == .Leader) {
-                        //FIXME
-                        // try self.node.handleClientCommand(cmd);
-                        _ = cmd;
-
+                        try self.node.handleClientCommand(cmd);
                         const ack = RpcMessage{ .Ack = .{} };
 
                         //TODO
                         // self.allocator ?
                         try sendFramedRpc(self.allocator, stream.writer(), ack); // reply to client
-
                     } else {
-
-                        //FIXME
-                        // const leader_id = self.node.leader_id orelse return;
-                        const leader_id = 123;
-
+                        const leader_id = self.node.leader_id orelse return error.UnknownLeader;
                         const fallback = RpcMessage{
                             .Redirect = .{ .to = leader_id },
                         };

@@ -18,6 +18,8 @@ pub fn RaftNode(comptime T: type) type {
         state: RaftState,
         current_term: types.Term,
         voted_for: ?NodeId,
+        leader_id: ?NodeId = null,
+
         log: Log,
         election_deadline: u64, // ms timestamp
 
@@ -25,7 +27,6 @@ pub fn RaftNode(comptime T: type) type {
         nodes_buffer: std.ArrayList(types.Node),
         votes_received: usize,
         total_votes: usize,
-        election_deadline_ms: u64, // timestamp in ms when election timeout expires
         commit_index: usize,
         next_index: []usize, // for each follower: index of the next log entry to send
         match_index: []usize, // for each follower: highest log entry known to be replicated
@@ -52,7 +53,6 @@ pub fn RaftNode(comptime T: type) type {
                 .inbox = std.ArrayList(RpcMessage).init(allocator),
                 .votes_received = 0,
                 .total_votes = 0,
-                .election_deadline_ms = 0,
                 .commit_index = 0,
                 .next_index = &[_]usize{},
                 .match_index = &[_]usize{},
@@ -127,7 +127,7 @@ pub fn RaftNode(comptime T: type) type {
             // Handle state-specific periodic work
             switch (self.state) {
                 .Follower, .Candidate => {
-                    if (now >= self.election_deadline_ms) {
+                    if (now >= self.election_deadline) {
                         self.startElection(cluster);
                     }
                 },
@@ -510,20 +510,20 @@ pub fn RaftNode(comptime T: type) type {
             return null;
         }
 
-        pub fn handleClientCommand(self: *RaftNode(T), command: []const u8) !void {
+        pub fn handleClientCommand(self: *RaftNode(T), command: Command) !void {
             if (self.state != .Leader) {
                 return error.NotLeader;
             }
 
             const entry = LogEntry{
                 .term = self.current_term,
-                .command = try self.allocator.dupe(u8, command),
+                .command = command,
             };
 
             try self.log.append(entry);
 
             // After append, update own match_index and next_index accordingly
-            const my_index = self.log.len(); // one-based
+            const my_index = self.log.entries.items.len;
             const my_log_index = my_index - 1;
 
             self.match_index[self.findNodeIndex(self.config.self_id).?] = my_log_index;

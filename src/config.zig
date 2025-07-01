@@ -52,8 +52,6 @@ pub fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !types.RaftCon
     };
 }
 
-
-//FIXME
 pub fn isSelf(id: types.NodeId, config: types.RaftConfig) bool {
     return id == config.self_id;
 }
