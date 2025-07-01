@@ -1,7 +1,5 @@
 const std = @import("std");
 const raft = @import("raft");
-// const config = @import("config");
-// const config = @import("config.zig");
 
 const Allocator = std.mem.Allocator;
 

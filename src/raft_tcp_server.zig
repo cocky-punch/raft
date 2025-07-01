@@ -19,7 +19,6 @@ pub fn RaftTcpServer(comptime T: type) type {
                 .node = node,
                 .cluster = cluster,
                 .max_clients = max_clients,
-                // .active_clients = std.atomic.Value(u32).init(0),
                 .active_clients = 0,
             };
         }
