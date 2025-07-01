@@ -15,19 +15,19 @@ pub fn RaftNode(comptime T: type) type {
     return struct {
         config: types.RaftConfig,
         allocator: std.mem.Allocator,
-        state: RaftState,
-        current_term: types.Term,
-        voted_for: ?NodeId,
+        state: RaftState = .Follower,
+        current_term: types.Term = 0,
+        voted_for: ?NodeId = null,
         leader_id: ?NodeId = null,
 
         log: Log,
-        election_deadline: u64, // ms timestamp
+        election_deadline: u64 = 0, // ms timestamp
 
         inbox: std.ArrayList(RpcMessage),
         nodes_buffer: std.ArrayList(types.Node),
-        votes_received: usize,
-        total_votes: usize,
-        commit_index: usize,
+        votes_received: usize = 0,
+        total_votes: usize = 0,
+        commit_index: usize = 0,
         next_index: []usize, // for each follower: index of the next log entry to send
         match_index: []usize, // for each follower: highest log entry known to be replicated
         node_id_to_index: std.AutoHashMap(NodeId, usize),
@@ -46,14 +46,7 @@ pub fn RaftNode(comptime T: type) type {
             const nodes = std.ArrayList(types.Node).init(allocator);
             return Self{
                 .allocator = allocator,
-                .state = .Follower,
-                .current_term = 0,
-                .voted_for = null,
-                .election_deadline = 0,
                 .inbox = std.ArrayList(RpcMessage).init(allocator),
-                .votes_received = 0,
-                .total_votes = 0,
-                .commit_index = 0,
                 .next_index = &[_]usize{},
                 .match_index = &[_]usize{},
                 .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
@@ -77,6 +70,7 @@ pub fn RaftNode(comptime T: type) type {
             self.becomeCandidate();
             self.votes_received = 1; // vote for self
             self.total_votes = self.config.nodes.len;
+            self.leader_id = null;
 
             // Determine last log index and term
             const last_log_index =
@@ -306,6 +300,8 @@ pub fn RaftNode(comptime T: type) type {
                 };
                 return;
             }
+
+            self.leader_id = req.leader_id;
 
             // If term is greater, step down
             if (req.term > self.current_term) {
@@ -672,6 +668,7 @@ pub fn Cluster(comptime T: type) type {
         }
 
         //TODO
+        //for TCP, sockets transport; real network, distributed clusters
         pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
             const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
             const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);

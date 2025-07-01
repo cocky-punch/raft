@@ -3,7 +3,7 @@ const raft = @import("raft");
 
 const Allocator = std.mem.Allocator;
 const CLIENTS_MAX_AMOUNT = 50;
-const HEARBEAT_TICK_DURATION_IN_MS = 50;
+const HEARTBEAT_TICK_DURATION_IN_MS = 50;
 
 const MyStateMachine = struct {
     pub fn apply(self: *MyStateMachine, cmd: raft.LogEntry) void {
@@ -57,6 +57,6 @@ pub fn main() !void {
     while (true) {
         try cluster.tick();
         // tick to the node every X ms
-        std.time.sleep(HEARBEAT_TICK_DURATION_IN_MS * std.time.ns_per_ms);
+        std.time.sleep(HEARTBEAT_TICK_DURATION_IN_MS * std.time.ns_per_ms);
     }
 }
