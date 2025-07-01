@@ -86,10 +86,11 @@ pub const RpcMessage = union(enum) {
         try std.json.stringify(self, .{}, writer);
     }
 
-    pub fn deserialize(bytes: []const u8) !RpcMessage {
+    pub fn deserialize(bytes: []u8) !RpcMessage {
         var fba = std.heap.FixedBufferAllocator.init(bytes);
-        var stream = std.json.TokenStream.init(bytes);
-        return try std.json.parse(RpcMessage, &fba.allocator, &stream, .{});
+        const parsed = try std.json.parseFromSlice(RpcMessage, fba.allocator(), bytes, .{});
+        defer parsed.deinit();
+        return parsed.value;
     }
 };
 

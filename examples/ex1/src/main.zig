@@ -51,7 +51,6 @@ pub fn main() !void {
         .active_clients = std.atomic.Value(u32).init(0),
     };
 
-
     //FIXME
     // const self_port = blk: {
     //     for (raft_config.nodes) |n| {

@@ -2,8 +2,6 @@ const std = @import("std");
 const RaftNode = @import("raft.zig").RaftNode;
 const Cluster = @import("raft.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
-// const atomic = std.atomic;
-// const AtomicU32 = std.atomic.Atomic(u32);
 
 pub fn RaftTcpServer(comptime T: type) type {
     return struct {
@@ -11,9 +9,6 @@ pub fn RaftTcpServer(comptime T: type) type {
         node: *RaftNode(T),
         cluster: *Cluster(T),
         max_clients: usize,
-        // active_clients: atomic.Int,
-        // active_clients: AtomicU32,
-        // active_clients: atomic(u32),
         active_clients: std.atomic.Value(u32),
 
         const Self = @This();
@@ -24,39 +19,46 @@ pub fn RaftTcpServer(comptime T: type) type {
                 .node = node,
                 .cluster = cluster,
                 .max_clients = max_clients,
-                // .active_clients = atomic.Int.init(0),
-                // .active_clients = AtomicU32.init(0),
-                // .active_clients = atomic(u32).init(0),
-                .active_clients = std.atomic.Value(u32).init(0)
+                // .active_clients = std.atomic.Value(u32).init(0),
+                .active_clients = 0,
             };
         }
 
         pub fn start(self: *Self, port: u16) !void {
+            const address = try std.net.Address.parseIp4("127.0.0.1", port);
+            var server = try address.listen(.{
+                .reuse_address = true,
+                .kernel_backlog = 128,
+            });
+            defer server.deinit();
 
-            //FIXME
-            var listener = try std.net.StreamServer.listen(.{ .port = port });
-            defer listener.deinit();
-
-            std.log.info("RaftTcpServer started on port {}", .{port});
+            std.debug.print("Server listening on: {}\n", .{address});
 
             while (true) {
-                const conn = try listener.accept();
+                const connection = try server.accept();
+                defer connection.stream.close();
 
-                const count = self.active_clients.fetchAdd(1, .SeqCst);
+                const count = self.active_clients.fetchAdd(1, .seq_cst);
                 if (count >= self.max_clients) {
-                    self.active_clients.fetchSub(1, .SeqCst);
+
+                    //TODO
+                    _ = self.active_clients.fetchSub(1, .seq_cst);
+
                     std.log.warn("Client limit reached ({}), rejecting connection", .{self.max_clients});
-                    conn.stream.close();
+                    connection.stream.close();
                     continue;
                 }
 
-                _ = try std.Thread.spawn(.{}, handleIncomingConnectionThread, .{ self, conn.stream });
+                std.debug.print("New connection from {}\n", .{connection.address});
+                _ = try std.Thread.spawn(.{}, handleIncomingConnectionThread, .{ self, connection.stream });
             }
         }
 
         fn handleIncomingConnectionThread(server: *Self, stream: std.net.Stream) void {
             defer stream.close();
-            defer server.active_clients.fetchSub(1, .SeqCst);
+
+            //TODO
+            defer _ = server.active_clients.fetchSub(1, .seq_cst);
 
             server.handleIncomingConnection(stream) catch |err| {
                 std.log.err("Connection handler failed: {}", .{err});
@@ -82,12 +84,25 @@ pub fn RaftTcpServer(comptime T: type) type {
             switch (msg) {
                 .ClientCommand => |cmd| {
                     if (self.node.state == .Leader) {
-                        try self.node.handleClientCommand(cmd);
-                        const ack: RpcMessage = .Ack{};
-                        try sendFramedRpc(stream.writer(), ack); // reply to client
+                        //FIXME
+                        // try self.node.handleClientCommand(cmd);
+                        _ = cmd;
+
+                        const ack = RpcMessage{ .Ack = .{} };
+
+                        //TODO
+                        // self.allocator ?
+                        try sendFramedRpc(self.allocator, stream.writer(), ack); // reply to client
+
                     } else {
-                        const leader_id = self.node.leader_id orelse return;
-                        const fallback: RpcMessage = .Redirect{ .to = leader_id };
+
+                        //FIXME
+                        // const leader_id = self.node.leader_id orelse return;
+                        const leader_id = 123;
+
+                        const fallback = RpcMessage{
+                            .Redirect = .{ .to = leader_id },
+                        };
                         try self.cluster.sendRpc(leader_id, fallback);
                     }
                 },

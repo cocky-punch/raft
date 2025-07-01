@@ -18,7 +18,6 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-
     //TODO
     const config_module = b.createModule(.{
         .root_source_file = b.path("../../src/config.zig"),
@@ -29,7 +28,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("../../src/types.zig"),
     });
     _ = types_module;
-
 
     //
     //exe
@@ -48,7 +46,6 @@ pub fn build(b: *std.Build) void {
     b.default_step.dependOn(&exe.step);
     const run_node = b.addRunArtifact(exe);
     b.step("run-node", "Run raft_node binary").dependOn(&run_node.step);
-
 
     //
     //cli

@@ -2,7 +2,6 @@
 // pub const config = @import("config.zig");
 // pub const raft = @import("raft.zig");
 
-
 pub const RaftNode = @import("raft.zig").RaftNode;
 pub const Cluster = @import("raft.zig").Cluster;
 pub const Command = @import("types.zig").Command;

@@ -23,7 +23,6 @@ pub fn main() !void {
         .apply = MySM.apply,
     };
 
-
     const Node = raft.RaftNode(MySM);
     const ClusterT = raft.Cluster(MySM);
 
@@ -42,15 +41,14 @@ pub fn main() !void {
     const raft_config = try cfg.loadConfig(allocator, "example_raft.yaml");
 
     // for (raft_config.peers) |p| {
-        // try cluster.node_addresses.put(p.id, p);
-        // std.debug.print("p: {}\n", .{p});
+    // try cluster.node_addresses.put(p.id, p);
+    // std.debug.print("p: {}\n", .{p});
     // }
 
     for (raft_config.nodes) |nd| {
         // try cluster.node_addresses.put(nd.id, nd);
         std.debug.print("node: {}\n", .{nd});
     }
-
 
     const tick_interval = 50; // milliseconds
     while (true) {
