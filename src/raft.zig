@@ -667,13 +667,11 @@ pub fn Cluster(comptime T: type) type {
             }
         }
 
-        //TODO
         //for TCP, sockets transport; real network, distributed clusters
         pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
             const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
             const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
             defer stream.close();
-
             try msg.serialize(stream.writer());
         }
     };

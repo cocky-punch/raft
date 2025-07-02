@@ -14,7 +14,23 @@ const MyStateMachine = struct {
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
-    const raft_config = try raft.loadConfig(allocator, "example_raft.yaml");
+    // const raft_config = try raft.loadConfig(allocator, "ex1_raft.yaml");
+    // Parse command-line args
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    var config_path: ?[]const u8 = null;
+
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--config") and i + 1 < args.len) {
+            config_path = args[i + 1];
+            i += 1;
+        }
+    }
+
+    const raft_config_path = config_path orelse return error.MissingConfigArgument;
+    const raft_config = try raft.loadConfig(allocator, raft_config_path);
 
     // state machine wrapper
     var sm_impl = MyStateMachine{};

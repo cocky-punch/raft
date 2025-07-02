@@ -33,10 +33,8 @@ pub fn RaftTcpServer(comptime T: type) type {
 
                 const count = self.active_clients.fetchAdd(1, .seq_cst);
                 if (count >= self.max_clients) {
-
-                    //TODO
+                    //reject a connection
                     _ = self.active_clients.fetchSub(1, .seq_cst);
-
                     std.log.warn("Client limit reached ({}), rejecting connection", .{self.max_clients});
                     connection.stream.close();
                     continue;
@@ -49,8 +47,6 @@ pub fn RaftTcpServer(comptime T: type) type {
 
         fn handleIncomingConnectionThread(server: *Self, stream: std.net.Stream) void {
             defer stream.close();
-
-            //TODO
             defer _ = server.active_clients.fetchSub(1, .seq_cst);
 
             server.handleIncomingConnection(stream) catch |err| {
