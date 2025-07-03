@@ -35,3 +35,7 @@ const raft = @import("raft");
 
 ## Usage
 WIP
+
+
+## Examples
+in the corresponding directory

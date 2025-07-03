@@ -1,8 +1,4 @@
-self:
-    id: 2
-    ip: "127.0.0.1"
-    port: 9002
-
+self_id: 3
 peers:
     - id: 1
       ip: "127.0.0.1"
