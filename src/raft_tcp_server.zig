@@ -29,7 +29,6 @@ pub fn RaftTcpServer(comptime T: type) type {
 
             while (true) {
                 const connection = try server.accept();
-                defer connection.stream.close();
 
                 const count = self.active_clients.fetchAdd(1, .seq_cst);
                 if (count >= self.max_clients) {

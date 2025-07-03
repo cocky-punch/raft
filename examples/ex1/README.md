@@ -2,13 +2,8 @@
 
 create multiple config files; the skelleton will be:
 ```
-self:
-    # EDIT
-    id: 2
-    ip: "127.0.0.1"
-
-    # EDIT
-    port: 9002
+# EDIT
+self_id: 1
 
 peers:
     - id: 1
@@ -29,24 +24,8 @@ peers:
 
 ```
 
-that is, `self.id` and `self.port` will differ for each one:
+`peers` must remain identical for all the config files; `self_id` will differ.
 
-```
-# node 1
-self:
-    id: 1
-    ip: "127.0.0.1"
-    port: 9001
-
-
-# node 2
-self:
-    id: 2
-    ip: "127.0.0.1"
-    port: 9002
-
-# and so one
-```
 
 Then run multiple nodes in its own tab
 ```
