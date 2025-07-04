@@ -1,4 +1,4 @@
-self_id: 1
+self_id: 4
 peers:
     - id: 1
       ip: "127.0.0.1"

@@ -2,11 +2,12 @@ const std = @import("std");
 
 pub const Command = union(enum) {
     Set: struct {
-        key: []u8,
-        value: []u8,
+        key: []const u8,
+        value: []const u8,
+
     },
     Delete: struct {
-        key: []u8,
+        key: []const u8,
     },
 
     pub fn format(
