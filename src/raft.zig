@@ -139,17 +139,13 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         fn applyLog(self: *RaftNode(T), entry: LogEntry) void {
-            std.debug.print("Applied entry at index {}: {}\n", .{
-                self.last_applied,
-                entry.command,
-            });
-
-            //TODO
-            // while (self.last_applied < self.commit_index) {
-            //     self.last_applied += 1;
-            //     const entry = self.log.get(self.last_applied - 1) orelse continue;
-            //     self.state_machine.applyLog(entry);
-            // }
+            if (self.state_machine) |sm| {
+                sm.applyLog(entry);
+                std.debug.print("Applied entry at index {}: {}\n", .{
+                    self.last_applied,
+                    entry.command,
+                });
+            }
         }
 
         fn becomeCandidate(self: *RaftNode(T)) void {

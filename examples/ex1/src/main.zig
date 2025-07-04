@@ -35,7 +35,6 @@ pub fn main() !void {
     const SM = raft.StateMachine(MyStateMachine);
     const sm = SM{
         .ctx = &sm_impl,
-        .apply = MyStateMachine.apply,
     };
 
     // Init RaftNode and Cluster

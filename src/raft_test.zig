@@ -8,13 +8,16 @@ const Command = @import("command.zig").Command;
 const StateMachine = @import("state_machine.zig").StateMachine;
 const LogEntry = @import("log_entry.zig").LogEntry;
 
-const DummyType = struct {};
-fn dummyApply(_: *DummyType, _: LogEntry) void {}
+const DummyType = struct {
+    pub fn apply(_: *DummyType, _: LogEntry) void {
+        // No-op
+    }
+};
 
 test "Follower becomes Candidate on election timeout" {
     const allocator = testing.allocator;
     var dt1 = DummyType{};
-    const sm = StateMachine(DummyType).init(&dt1, dummyApply);
+    const sm = StateMachine(DummyType).init(&dt1);
     var cluster = Cluster(DummyType).init(allocator);
     defer cluster.deinit();
 

@@ -20,7 +20,6 @@ pub fn main() !void {
 
     const sm1 = SM{
         .ctx = &sm_ctx,
-        .apply = MySM.apply,
     };
 
     const Node = raft.RaftNode(MySM);

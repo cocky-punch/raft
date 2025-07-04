@@ -4,7 +4,6 @@ pub const Command = union(enum) {
     Set: struct {
         key: []const u8,
         value: []const u8,
-
     },
     Delete: struct {
         key: []const u8,
