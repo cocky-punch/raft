@@ -26,15 +26,94 @@ exe.root_module.addImport("raft", raft.module("raft"));
 ```
 
 
-And in your Zig code
-
-```
-const raft = @import("raft");
-// ........
-```
-
 ## Usage
-WIP
+
+* Implement `MyStateMachine#apply(...)`
+* create a config per node; in it specify itself and all the nodes of a cluster
+* run each node
+* interract with them via the cli-client
+
+```
+const std = @import("std");
+const raft = @import("raft");
+
+const Allocator = std.mem.Allocator;
+
+// Your own state machine implementation.
+// This will apply committed commands (Set/Delete) to a file
+const MyStateMachine = struct {
+    db_file: std.fs.File,
+
+    // Interface function
+    // Custom implementation, for a custom storage
+    pub fn apply(self: *MyStateMachine, entry: raft.LogEntry) void {
+        switch (entry.command) {
+            .Set => |cmd| {
+                // Simulate persistent insert by appending to file
+                _ = self.db_file.writer().print("SET {s} {any}\n", .{cmd.key, cmd.value}) catch {};
+            },
+            .Delete => |cmd| {
+                _ = self.db_file.writer().print("DELETE {s}\n", .{cmd.key}) catch {};
+            },
+        }
+    }
+
+    pub fn init() !MyStateMachine {
+        const f = try std.fs.cwd().createFile("raft_db.txt", .{ .read = true, .truncate = false });
+        return MyStateMachine{ .db_file = f };
+    }
+
+    pub fn deinit(self: *MyStateMachine) void {
+        self.db_file.close();
+    }
+};
+
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    // Load config
+    const config = try raft.loadConfig(allocator, "node1_raft.yaml");
+
+    // Wrap the state machine logic
+    var sm_impl = try MyStateMachine.init();
+    const sm = raft.StateMachine(MyStateMachine){
+        .ctx = &sm_impl,
+    };
+
+    const Node = raft.RaftNode(MyStateMachine);
+    const ClusterT = raft.Cluster(MyStateMachine);
+    var cluster = ClusterT.init(allocator);
+    var node = try Node.init(allocator, config.self_id, sm);
+
+    for (config.nodes) |peer| {
+        try cluster.addNodeAddress(peer.id, peer.address);
+    }
+
+    // Start TCP server in background
+    var server = raft.RaftTcpServer(MyStateMachine).init(
+        allocator,
+        &node,
+        &cluster,
+        50, // max clients
+    );
+    const self_port = blk: {
+        for (config.nodes) |p| {
+            if (p.id == config.self_id) break :blk p.address.port;
+        }
+        return error.SelfNotFound;
+    };
+    const t = try std.Thread.spawn(.{}, raft.RaftTcpServer(MyStateMachine).start, .{ &server, self_port });
+    t.detach();
+
+    // Main loop: Raft ticking (election, heartbeat, etc.)
+    while (true) {
+        try cluster.tick();
+        std.time.sleep(50 * std.time.ns_per_ms);
+    }
+}
+
+```
 
 
 ## Examples
