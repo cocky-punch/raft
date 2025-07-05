@@ -29,8 +29,9 @@ exe.root_module.addImport("raft", raft.module("raft"));
 ## Usage
 
 * Implement `MyStateMachine#apply(...)`
-* create a config per node; in it specify itself and all the nodes of a cluster
-* run each node
+* create a config for each node
+* in each config specify a node itself and all the nodes, including itself again, of a cluster
+* run each of the nodes
 * interract with them via the cli-client
 
 ```
