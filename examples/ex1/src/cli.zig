@@ -25,11 +25,19 @@ pub fn main() !void {
 
     std.log.debug("[DEBUG] [cli] cmd_type: {s}; key_owned: {s}; value_owned: {s}", .{ cmd_type, key_owned, value_owned });
 
-    const msg = if (std.mem.eql(u8, cmd_type, "set")) raft.RpcMessage{
-        .ClientCommand = raft.Command{ .Set = .{ .key = key_owned, .value = value_owned } },
-    } else if (std.mem.eql(u8, cmd_type, "delete")) raft.RpcMessage{
-        .ClientCommand = raft.Command{ .Delete = .{ .key = key_owned } },
-    } else return error.InvalidCommand;
+    const msg =
+        if (std.mem.eql(u8, cmd_type, "set")) raft.RpcMessage{
+            .ClientCommand = raft.Command{ .Set = .{ .key = key_owned, .value = value_owned } },
+        } else if (std.mem.eql(u8, cmd_type, "delete")) raft.RpcMessage{
+            .ClientCommand = raft.Command{ .Delete = .{ .key = key_owned } },
+        } else if (std.mem.eql(u8, cmd_type, "update")) blk: {
+            //FIXME
+            std.log.debug("[DEBUG] 'update' command isn't implemented", .{});
+            // check first whether the key exists
+            break :blk raft.RpcMessage{ .ClientCommand = raft.Command{ .Update = .{ .key = key_owned, .value = value_owned } } };
+        } else {
+            return error.InvalidCommand;
+        };
 
     std.log.debug("[DEBUG] [cli] msg: {}", .{msg});
 
