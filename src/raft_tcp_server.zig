@@ -10,11 +10,19 @@ pub fn RaftTcpServer(comptime T: type) type {
         cluster: *Cluster(T),
         max_clients: usize,
         active_clients: std.atomic.Value(u32),
+        pending_acks: std.AutoHashMap(u64, std.net.Stream),
+        next_command_id: std.atomic.Value(u64).init(0),
 
         const Self = @This();
 
         pub fn init(allocator: std.mem.Allocator, node: *RaftNode(T), cluster: *Cluster(T), max_clients: usize) Self {
-            return Self{ .allocator = allocator, .node = node, .cluster = cluster, .max_clients = max_clients, .active_clients = std.atomic.Value(u32).init(0) };
+            return Self{
+                .allocator = allocator,
+                .node = node,
+                .cluster = cluster,
+                .max_clients = max_clients,
+                .pending_acks = std.AutoHashMap(u64, std.net.Stream).init(allocator),
+            };
         }
 
         pub fn start(self: *Self, port: u16) !void {
@@ -96,6 +104,10 @@ pub fn RaftTcpServer(comptime T: type) type {
                     try self.node.enqueueMessage(msg);
                 },
             }
+        }
+
+        fn deinit(self: *Self) void {
+            self.pending_acks.deinit();
         }
     };
 }

@@ -2,6 +2,19 @@
 
 An implementation of Raft Consensus Algorithm in Zig
 
+## Features
+- [x] Leader tracking
+- [x] Cluster-wide coordination (in-memory / true networking)
+- [x] Client redirection
+- [x] Election timeout logic
+- [x] Client command submission
+- [x] Log replication
+- [x] Apply committed entries
+- [x] Heartbeats / ticks
+- [x] State machine plumbing
+- [x] Basic TCP transport
+- [ ] Client acknowledgment / client request retries - confirmations
+- [ ] Persistent Log
 
 ## Installation
 
@@ -56,6 +69,14 @@ const MyStateMachine = struct {
             .Delete => |cmd| {
                 _ = self.db_file.writer().print("DELETE {s}\n", .{cmd.key}) catch {};
             },
+
+
+            //TODO
+            .Update => |u| {
+                // Optional: check if key exists first
+                if (!self.db.contains(u.key)) return error.KeyNotFound;
+                try self.db_file_update_key(u.key, u.value); // Overwrite
+            },
         }
     }
 
@@ -67,7 +88,17 @@ const MyStateMachine = struct {
     pub fn deinit(self: *MyStateMachine) void {
         self.db_file.close();
     }
+
+    //mock method
+    inline fn db_file_contain_key(k: string) bool {
+        return true;
+    }
+
+    //mock method
+    inline fn db_file_update_key(k: string, v: string) void {
+    }
 };
+
 
 
 pub fn main() !void {

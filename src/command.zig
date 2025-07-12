@@ -29,3 +29,8 @@ pub const Command = union(enum) {
         }
     }
 };
+
+pub const CommandWithId = struct {
+    id: u64,
+    command: Command,
+};

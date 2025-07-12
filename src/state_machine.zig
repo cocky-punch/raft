@@ -1,5 +1,4 @@
 const std = @import("std");
-
 const LogEntry = @import("log_entry.zig").LogEntry;
 
 pub fn StateMachine(comptime T: type) type {
@@ -7,6 +6,10 @@ pub fn StateMachine(comptime T: type) type {
         ctx: *T,
 
         pub fn init(ctx: *T) @This() {
+            if (!@hasDecl(T, "apply")) {
+                @compileError("StateMachine/T must implement: fn apply(self: *T, entry: LogEntry) void");
+            }
+
             return .{
                 .ctx = ctx,
             };

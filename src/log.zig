@@ -8,6 +8,7 @@ pub const Log = struct {
     //TODO
     base_index: u64 = 0,
     base_term: u64 = 0,
+    // command_id: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator) Log {
         return Log{
@@ -77,3 +78,12 @@ pub const Log = struct {
         self.base_term = term;
     }
 };
+
+//TODO
+// const PersistentLog = struct {
+//     file: std.fs.File,
+//     allocator: std.mem.Allocator,
+//     pub fn append(self: *Self, entry: LogEntry) !void {}
+//     pub fn get(self: *Self, index: usize) ?LogEntry {}
+//     pub fn loadAll(self: *Self) !void {}
+// };

@@ -108,6 +108,7 @@ pub fn RaftNode(comptime T: type) type {
                         .AppendEntries => |req| self.handleAppendEntries(req, cluster),
                         .AppendEntriesResponse => |resp| self.handleAppendEntriesResponse(resp, cluster),
 
+                        //TODO
                         .InstallSnapshot => |_| {},
                         .InstallSnapshotResponse => |_| {},
                         .TimeoutNow => |_| {},
@@ -135,6 +136,20 @@ pub fn RaftNode(comptime T: type) type {
                 self.last_applied += 1;
                 const entry = self.log.get(self.last_applied - 1) orelse continue;
                 self.applyLog(entry);
+
+                //send a due acknolegment to the client
+                if (entry.command_id) |cmd_id| {
+                    // if (entry.command.id) |cmd_id| {
+                    if (self.pending_acks.get(cmd_id)) |client_info| {
+                        // send ack message
+                        const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
+                        client_info.sendRpc(ack_msg) catch |err| {
+                            // handle send error
+                            _ = err;
+                        };
+                        self.pending_acks.remove(cmd_id);
+                    }
+                }
             }
         }
 

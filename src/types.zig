@@ -1,5 +1,6 @@
 const std = @import("std");
 pub const Command = @import("command.zig").Command;
+pub const CommandWithId = @import("command.zig").CommandWithId;
 const LogEntry = @import("log_entry.zig").LogEntry;
 
 pub const Term = u64;
@@ -79,8 +80,9 @@ pub const RpcMessage = union(enum) {
     TimeoutNow: struct {},
 
     ClientCommand: Command,
+    // ClientCommand: CommandWithId,
     Redirect: struct { to: NodeId },
-    Ack: struct {},
+    Ack: struct { command_id: u64 },
 
     pub fn serialize(self: RpcMessage, writer: anytype) !void {
         try std.json.stringify(self, .{}, writer);
