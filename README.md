@@ -4,7 +4,10 @@ An implementation of Raft Consensus Algorithm in Zig
 
 ## Features
 - [x] Leader tracking
-- [x] Cluster-wide coordination (in-memory / true networking)
+- [x] In-memory transport
+- [x] Cluster-wide coordination
+- [x] Basic TCP transport
+- [ ] gRPC transport
 - [x] Client redirection
 - [x] Election timeout logic
 - [x] Client command submission
@@ -12,7 +15,6 @@ An implementation of Raft Consensus Algorithm in Zig
 - [x] Apply committed entries
 - [x] Heartbeats / ticks
 - [x] State machine plumbing
-- [x] Basic TCP transport
 - [ ] Client acknowledgment / client request retries - confirmations
 - [ ] Persistent Log
 

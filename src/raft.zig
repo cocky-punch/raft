@@ -138,18 +138,18 @@ pub fn RaftNode(comptime T: type) type {
                 self.applyLog(entry);
 
                 //send a due acknolegment to the client
-                if (entry.command_id) |cmd_id| {
-                    // if (entry.command.id) |cmd_id| {
-                    if (self.pending_acks.get(cmd_id)) |client_info| {
-                        // send ack message
-                        const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
-                        client_info.sendRpc(ack_msg) catch |err| {
-                            // handle send error
-                            _ = err;
-                        };
-                        self.pending_acks.remove(cmd_id);
-                    }
-                }
+                // if (entry.command_id) |cmd_id| {
+                //     // if (entry.command.id) |cmd_id| {
+                //     if (self.pending_acks.get(cmd_id)) |client_info| {
+                //         // send ack message
+                //         const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
+                //         client_info.sendRpc(ack_msg) catch |err| {
+                //             // handle send error
+                //             _ = err;
+                //         };
+                //         self.pending_acks.remove(cmd_id);
+                //     }
+                // }
             }
         }
 

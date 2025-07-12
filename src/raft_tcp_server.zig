@@ -6,22 +6,25 @@ const RpcMessage = @import("types.zig").RpcMessage;
 pub fn RaftTcpServer(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
-        node: *RaftNode(T),
+        local_node: *RaftNode(T),
         cluster: *Cluster(T),
         max_clients: usize,
         active_clients: std.atomic.Value(u32),
         pending_acks: std.AutoHashMap(u64, std.net.Stream),
-        next_command_id: std.atomic.Value(u64).init(0),
+        last_checked_log_index: usize = 0,
+        next_command_id: std.atomic.Value(u64),
 
         const Self = @This();
 
-        pub fn init(allocator: std.mem.Allocator, node: *RaftNode(T), cluster: *Cluster(T), max_clients: usize) Self {
+        pub fn init(allocator: std.mem.Allocator, local_node: *RaftNode(T), cluster: *Cluster(T), max_clients: usize) Self {
             return Self{
                 .allocator = allocator,
-                .node = node,
+                .local_node = local_node,
                 .cluster = cluster,
                 .max_clients = max_clients,
                 .pending_acks = std.AutoHashMap(u64, std.net.Stream).init(allocator),
+                .active_clients = std.atomic.Value(u32).init(0),
+                .next_command_id = std.atomic.Value(u64).init(0),
             };
         }
 
@@ -85,15 +88,29 @@ pub fn RaftTcpServer(comptime T: type) type {
 
             switch (msg) {
                 .ClientCommand => |cmd| {
-                    if (self.node.state == .Leader) {
-                        try self.node.handleClientCommand(cmd);
-                        const ack = RpcMessage{ .Ack = .{} };
+                    if (self.local_node.state == .Leader) {
+
+                        //TODO
+                        //
+                        const cmd_id = self.next_command_id.fetchAdd(1, .seq_cst);
+                        // const cmd_id = std.crypto.random.int(u64);
+
+                        // const cmd2 = CommandWithId{
+                        //     .id = cmd_id,
+                        //     .command = cmd, // the Command from the RpcMessage
+                        // };
+
+                        try self.pending_acks.put(cmd_id, stream);
+                        try self.local_node.handleClientCommand(cmd);
+                        // try self.local_node.handleClientCommand(cmd2);
+                        // const ack = RpcMessage{ .Ack = .{} };
+                        const ack = RpcMessage{ .Ack = .{.command_id = cmd_id} };
 
                         //TODO
                         // self.allocator ?
                         try sendFramedRpc(self.allocator, stream.writer(), ack); // reply to client
                     } else {
-                        const leader_id = self.node.leader_id orelse return error.UnknownLeader;
+                        const leader_id = self.local_node.leader_id orelse return error.UnknownLeader;
                         const fallback = RpcMessage{
                             .Redirect = .{ .to = leader_id },
                         };
@@ -101,13 +118,29 @@ pub fn RaftTcpServer(comptime T: type) type {
                     }
                 },
                 else => {
-                    try self.node.enqueueMessage(msg);
+                    try self.local_node.enqueueMessage(msg);
                 },
             }
         }
 
         fn deinit(self: *Self) void {
             self.pending_acks.deinit();
+        }
+
+        pub fn checkCommittedAcks(self: *Self) !void {
+            while (self.last_checked_log_index < self.local_node.commit_index) {
+                const entry = self.local_node.log.get(self.last_checked_log_index) orelse break;
+
+                if (entry.command_id) |cmd_id| {
+                    if (self.pending_acks.get(cmd_id)) |stream| {
+                        const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
+                        _ = sendFramedRpc(self.allocator, stream.writer(), ack_msg) catch {};
+                        _ = self.pending_acks.remove(cmd_id);
+                    }
+                }
+
+                self.last_checked_log_index += 1;
+            }
         }
     };
 }
