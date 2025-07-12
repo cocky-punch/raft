@@ -17,6 +17,7 @@ An implementation of Raft Consensus Algorithm in Zig
 - [x] State machine plumbing
 - [ ] Client acknowledgment / client request retries - confirmations
 - [ ] Persistent Log
+- [ ] proper handler of `TimeoutNow` message
 
 ## Installation
 

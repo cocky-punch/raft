@@ -104,10 +104,8 @@ pub fn RaftTcpServer(comptime T: type) type {
                         try self.local_node.handleClientCommand(cmd);
                         // try self.local_node.handleClientCommand(cmd2);
                         // const ack = RpcMessage{ .Ack = .{} };
-                        const ack = RpcMessage{ .Ack = .{.command_id = cmd_id} };
+                        const ack = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
 
-                        //TODO
-                        // self.allocator ?
                         try sendFramedRpc(self.allocator, stream.writer(), ack); // reply to client
                     } else {
                         const leader_id = self.local_node.leader_id orelse return error.UnknownLeader;

@@ -1,5 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
+const builtin = @import("builtin");
+
 pub const StateMachine = @import("state_machine.zig").StateMachine;
 const RaftState = types.RaftState;
 const NodeId = types.NodeId;
@@ -111,7 +113,13 @@ pub fn RaftNode(comptime T: type) type {
                         //TODO
                         .InstallSnapshot => |_| {},
                         .InstallSnapshotResponse => |_| {},
-                        .TimeoutNow => |_| {},
+                        .TimeoutNow => |_| {
+                            // Start election immediately
+                            self.startElection(cluster);
+                            if (builtin.mode == .Debug) {
+                                std.debug.print("Node {} received TimeoutNow, starting election immediately\n", .{self.config.self_id});
+                            }
+                        },
                         else => {
                             //TODO
                         },
@@ -614,6 +622,17 @@ pub fn RaftNode(comptime T: type) type {
                 .InstallSnapshotResponse = types.InstallSnapshotResponse{ .term = self.current_term, .follower_id = self.config.self_id, .success = true },
             };
             try cluster.sendMessage(snap.leader_id, resp);
+        }
+
+        //TODO
+        pub fn transferLeadership(self: *RaftNode(T), cluster: *Cluster(T), target_id: u64) void {
+            becomeFollower(self);
+            // Tell the target to start election
+            cluster.send(target_id, .{ .TimeoutNow = {} });
+
+            if (builtin.mode == .Debug) {
+                std.debug.print("Node {} stepped down, asked node {} to take over\n", .{ self.id, target_id });
+            }
         }
     };
 }
