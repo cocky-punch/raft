@@ -101,12 +101,15 @@ pub fn RaftTcpServer(comptime T: type) type {
                         // };
 
                         try self.pending_acks.put(cmd_id, stream);
+
+                        //TODO
                         try self.local_node.handleClientCommand(cmd);
                         // try self.local_node.handleClientCommand(cmd2);
+
                         // const ack = RpcMessage{ .Ack = .{} };
                         const ack = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
 
-                        try sendFramedRpc(self.allocator, stream.writer(), ack); // reply to client
+                        try sendFramedRpc(self.allocator, stream.writer(), ack);
                     } else {
                         const leader_id = self.local_node.leader_id orelse return error.UnknownLeader;
                         const fallback = RpcMessage{
@@ -128,11 +131,13 @@ pub fn RaftTcpServer(comptime T: type) type {
         pub fn checkCommittedAcks(self: *Self) !void {
             while (self.last_checked_log_index < self.local_node.commit_index) {
                 const entry = self.local_node.log.get(self.last_checked_log_index) orelse break;
-
                 if (entry.command_id) |cmd_id| {
                     if (self.pending_acks.get(cmd_id)) |stream| {
                         const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
-                        _ = sendFramedRpc(self.allocator, stream.writer(), ack_msg) catch {};
+                        _ = sendFramedRpc(self.allocator, stream.writer(), ack_msg) catch |err| {
+                            std.log.warn("Failed to send ack for cmd_id {}: {}", .{ cmd_id, err });
+                        };
+
                         _ = self.pending_acks.remove(cmd_id);
                     }
                 }
