@@ -17,7 +17,8 @@ An implementation of Raft Consensus Algorithm in Zig
 - [x] State machine plumbing
 - [ ] Client acknowledgment / client request retries - confirmations
 - [ ] Persistent Log
-- [ ] proper handler of `TimeoutNow` message
+- [ ] proper handler of `TimeoutNow` message (Raft extensions)
+- [ ] read-only GET message (Raft extensions)
 
 ## Installation
 
@@ -144,6 +145,7 @@ pub fn main() !void {
     // Main loop: Raft ticking (election, heartbeat, etc.)
     while (true) {
         try cluster.tick();
+        try server.checkCommittedAcks(); // sends acks to clients if commit_index advanced
         std.time.sleep(50 * std.time.ns_per_ms);
     }
 }

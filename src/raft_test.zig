@@ -8,20 +8,24 @@ const Command = @import("command.zig").Command;
 const StateMachine = @import("state_machine.zig").StateMachine;
 const LogEntry = @import("log_entry.zig").LogEntry;
 
-const DummyType = struct {
-    pub fn apply(_: *DummyType, _: LogEntry) void {
+const DummyStateMachine = struct {
+    pub fn apply(_: *DummyStateMachine, _: LogEntry) void {
+        // No-op
+    }
+
+    pub fn query_get(_: *DummyStateMachine, _: []const u8) []const u8 {
         // No-op
     }
 };
 
 test "Follower becomes Candidate on election timeout" {
     const allocator = testing.allocator;
-    var dt1 = DummyType{};
-    const sm = StateMachine(DummyType).init(&dt1);
-    var cluster = Cluster(DummyType).init(allocator);
+    var dt1 = DummyStateMachine{};
+    const sm = StateMachine(DummyStateMachine).init(&dt1);
+    var cluster = Cluster(DummyStateMachine).init(allocator);
     defer cluster.deinit();
 
-    var node = try RaftNode(DummyType).init(allocator, 1, sm);
+    var node = try RaftNode(DummyStateMachine).init(allocator, 1, sm);
     defer node.deinit();
 
     node.resetElectionTimeout();

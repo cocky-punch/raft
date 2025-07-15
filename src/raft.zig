@@ -516,19 +516,28 @@ pub fn RaftNode(comptime T: type) type {
                 return error.NotLeader;
             }
 
-            const entry = LogEntry{
-                .term = self.current_term,
-                .command = command,
-            };
+            switch (command) {
+                .Get => {
+                    // Immediately return the query result from committed state
+                    // (We assume the caller will handle the return value)
+                    return T.query(self.state_machine, command.key);
+                },
+                else => {
+                    const entry = LogEntry{
+                        .term = self.current_term,
+                        .command = command,
+                    };
 
-            try self.log.append(entry);
+                    try self.log.append(entry);
 
-            // After append, update own match_index and next_index accordingly
-            const my_index = self.log.entries.items.len;
-            const my_log_index = my_index - 1;
+                    // After append, update own match_index and next_index accordingly
+                    const my_index = self.log.entries.items.len;
+                    const my_log_index = my_index - 1;
 
-            self.match_index[self.findNodeIndex(self.config.self_id).?] = my_log_index;
-            self.next_index[self.findNodeIndex(self.config.self_id).?] = my_log_index + 1;
+                    self.match_index[self.findNodeIndex(self.config.self_id).?] = my_log_index;
+                    self.next_index[self.findNodeIndex(self.config.self_id).?] = my_log_index + 1;
+                },
+            }
         }
 
         pub fn submitCommand(self: *RaftNode(T), command: Command) !void {

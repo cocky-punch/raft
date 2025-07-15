@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const RaftNode = @import("raft.zig").RaftNode;
 const Cluster = @import("raft.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
@@ -76,16 +77,18 @@ pub fn RaftTcpServer(comptime T: type) type {
             var buffer = try self.allocator.alloc(u8, msg_len);
             defer self.allocator.free(buffer);
 
-            std.log.debug("[DEBUG] #1", .{});
-
+            if (builtin.mode == .Debug) {
+                std.log.debug("[DEBUG] #1", .{});
+            }
             // the counter has advanced its position, hence from 0 again
             try reader.readNoEof(buffer[0..msg_len]);
             std.log.debug("[DEBUG] #2 buffer: {s}", .{buffer[0..msg_len]});
 
             const msg = try RpcMessage.deserialize(buffer);
 
-            std.log.debug("[DEBUG] #3", .{});
-
+            if (builtin.mode == .Debug) {
+                std.log.debug("[DEBUG] #3", .{});
+            }
             switch (msg) {
                 .ClientCommand => |cmd| {
                     if (self.local_node.state == .Leader) {

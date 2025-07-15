@@ -12,6 +12,9 @@ pub const Command = union(enum) {
         key: []const u8,
         value: []const u8,
     },
+    Get: struct {
+        key: []const u8,
+    },
 
     pub fn format(
         self: Command,
@@ -26,6 +29,7 @@ pub const Command = union(enum) {
             .Set => |cmd| try writer.print("Set({s} = {s})", .{ cmd.key, cmd.value }),
             .Delete => |cmd| try writer.print("Delete({s})", .{cmd.key}),
             .Update => |cmd| try writer.print("Update({s} = {s})", .{ cmd.key, cmd.value }),
+            .Get => |cmd| try writer.print("Get({s})", .{cmd.key}),
         }
     }
 };
