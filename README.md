@@ -17,7 +17,7 @@ An implementation of Raft Consensus Algorithm in Zig
 - [x] State machine plumbing
 - [ ] Client acknowledgment / client request retries - confirmations
 - [ ] Persistent Log
-- [ ] proper handler of `TimeoutNow` message (Raft extensions)
+- [ ] proper handler of `TimeoutNow` -  Leadership Transfer Mechanism - message (Raft extensions)
 - [ ] read-only GET message (Raft extensions)
 
 ## Installation
@@ -80,6 +80,10 @@ const MyStateMachine = struct {
                 // Optional: check if key exists first
                 if (!self.db.contains(u.key)) return error.KeyNotFound;
                 try self.db_file_update_key(u.key, u.value); // Overwrite
+            },
+            //TODO
+            .Get => |cmd| {
+                // find a value in the file
             },
         }
     }

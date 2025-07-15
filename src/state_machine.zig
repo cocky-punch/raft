@@ -10,8 +10,8 @@ pub fn StateMachine(comptime T: type) type {
                 @compileError("StateMachine/T must implement: fn apply(self: *T, entry: LogEntry) void");
             }
 
-            if (!@hasDecl(T, "query_get")) {
-                @compileError("StateMachine/T must implement: fn query_get(self: *T, key: []const u8) []const u8");
+            if (!@hasDecl(T, "queryGet")) {
+                @compileError("StateMachine/T must implement: fn queryGet(self: *T, key: []const u8) []const u8");
             }
 
             return .{
@@ -23,8 +23,8 @@ pub fn StateMachine(comptime T: type) type {
             T.apply(self.ctx, entry);
         }
 
-        pub fn query_get(self: @This(), key: []const u8) []const u8 {
-            return T.query_get(self.ctx, key);
+        pub fn queryGet(self: @This(), key: []const u8) []const u8 {
+            return T.queryGet(self.ctx, key);
         }
 
         pub fn serialize(self: StateMachine(T), writer: anytype) !void {

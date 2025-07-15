@@ -13,7 +13,7 @@ const DummyStateMachine = struct {
         // No-op
     }
 
-    pub fn query_get(_: *DummyStateMachine, _: []const u8) []const u8 {
+    pub fn queryGet(_: *DummyStateMachine, _: []const u8) []const u8 {
         // No-op
     }
 };
