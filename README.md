@@ -16,9 +16,11 @@ An implementation of Raft Consensus Algorithm in Zig
 - [x] Heartbeats / ticks
 - [x] State machine plumbing
 - [ ] Client acknowledgment / client request retries - confirmations
-- [ ] Persistent Log
-- [ ] proper handler of `TimeoutNow` -  Leadership Transfer Mechanism - message (Raft extensions)
-- [ ] read-only GET message (Raft extensions)
+- [ ] Persistent log
+- [ ] Rotation of the log files
+- [ ] Persistent snapshots
+- [ ] Proper handler of `TimeoutNow` -  Leadership Transfer Mechanism - message (Raft extensions)
+- [ ] Read-only GET message (Raft extensions)
 
 ## Installation
 

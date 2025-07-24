@@ -4,6 +4,9 @@ const RaftNode = raft.RaftNode;
 const LogEntry = @import("log_entry.zig").LogEntry;
 const cfg = @import("config.zig");
 
+
+const a1 = @import("rotating_binary_log.zig");
+
 const MySM = struct {
     pub fn apply(self: *MySM, entry: LogEntry) void {
         std.debug.print("Applying entry: {}\n", .{entry});
