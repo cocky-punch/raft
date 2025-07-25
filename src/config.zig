@@ -11,6 +11,7 @@ const RawPeer = struct {
 const RawConfig = struct {
     self_id: types.NodeId,
     peers: []const RawPeer,
+    snapshots_enabled: bool,
 };
 
 pub fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !types.RaftConfig {
@@ -49,6 +50,7 @@ pub fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !types.RaftCon
     return types.RaftConfig{
         .self_id = raw.self_id,
         .nodes = node_list,
+        .snapshots_enabled = raw.snapshots_enabled,
     };
 }
 

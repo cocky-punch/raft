@@ -18,6 +18,7 @@ pub const Node = struct {
 pub const RaftConfig = struct {
     self_id: NodeId,
     nodes: []const Node, // includes self
+    snapshots_enabled: bool,
 };
 
 pub const RaftState = enum {
@@ -96,7 +97,16 @@ pub const RpcMessage = union(enum) {
 pub const Snapshot = struct {
     last_included_index: usize,
     last_included_term: usize,
-    state_data: []u8, // raw bytes representing the state machine
+    // raw bytes representing the state machine
+    state_data: []u8,
+    // if a disk is utilized
+    file_path: ?[]const u8,
+};
+
+const SnapshotBackend = enum {
+    InMemory,
+    File,
+    // Sqlite, etc.
 };
 
 pub const Transport = union(enum) {

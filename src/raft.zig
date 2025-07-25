@@ -58,6 +58,8 @@ pub fn RaftNode(comptime T: type) type {
                 .config = types.RaftConfig{
                     .self_id = id,
                     .nodes = nodes.items,
+                     //TODO
+                    .snapshots_enabled = false,
                 },
             };
         }
@@ -629,6 +631,7 @@ pub fn RaftNode(comptime T: type) type {
                 std.debug.print("Node {} stepped down, asked node {} to take over\n", .{ self.id, target_id });
             }
         }
+
     };
 }
 
