@@ -78,12 +78,3 @@ pub const Log = struct {
         self.base_term = term;
     }
 };
-
-//TODO
-// const PersistentLog = struct {
-//     file: std.fs.File,
-//     allocator: std.mem.Allocator,
-//     pub fn append(self: *Self, entry: LogEntry) !void {}
-//     pub fn get(self: *Self, index: usize) ?LogEntry {}
-//     pub fn loadAll(self: *Self) !void {}
-// };

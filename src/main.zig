@@ -5,7 +5,8 @@ const LogEntry = @import("log_entry.zig").LogEntry;
 const cfg = @import("config.zig");
 
 // TODO debug
-const a1 = @import("rotating_binary_log.zig");
+// const a1 = @import("rotating_binary_log.zig");
+const A2 = @import("log_v2.zig").PersistentLog;
 //
 
 const MySM = struct {

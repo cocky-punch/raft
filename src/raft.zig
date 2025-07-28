@@ -6,7 +6,7 @@ pub const StateMachine = @import("state_machine.zig").StateMachine;
 const RaftState = types.RaftState;
 const NodeId = types.NodeId;
 const RpcMessage = types.RpcMessage;
-const Log = @import("log.zig").Log;
+const Log = @import("log_v1.zig").Log;
 const Command = @import("command.zig").Command;
 const LogEntry = @import("log_entry.zig").LogEntry;
 const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
@@ -611,6 +611,7 @@ pub fn RaftNode(comptime T: type) type {
             try self.state_machine.?.deserialize(snap.data);
 
             // Update log
+            // FIXME - move to snapshot
             try self.log.replaceWithSnapshotPoint(snap.last_included_index, snap.last_included_term);
             self.commit_index = snap.last_included_index;
             self.last_applied = snap.last_included_index;
