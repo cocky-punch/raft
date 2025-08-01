@@ -8,10 +8,17 @@ const RawPeer = struct {
     port: u16,
 };
 
+// FIXME
+pub const LogConfig = struct {
+    storage_type: enum { memory, persistent },
+    data_dir: ?[]const u8 = null,
+};
+
 const RawConfig = struct {
     self_id: types.NodeId,
     peers: []const RawPeer,
     snapshots_enabled: bool,
+    logging: LogConfig,
 };
 
 pub fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !types.RaftConfig {

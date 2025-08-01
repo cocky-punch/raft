@@ -6,7 +6,11 @@ pub const StateMachine = @import("state_machine.zig").StateMachine;
 const RaftState = types.RaftState;
 const NodeId = types.NodeId;
 const RpcMessage = types.RpcMessage;
-const Log = @import("log_v1.zig").Log;
+
+//TODO
+// const Log = @import("log_v1.zig").Log;
+const Log = @import("log_v2.zig").Log;
+
 const Command = @import("command.zig").Command;
 const LogEntry = @import("log_entry.zig").LogEntry;
 const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
@@ -46,19 +50,25 @@ pub fn RaftNode(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
             const nodes = std.ArrayList(types.Node).init(allocator);
+            // Memory log
+            var log_memory_opts = std.StringHashMap([]const u8).init(allocator);
+            defer log_memory_opts.deinit();
+            try log_memory_opts.put("storage_type", "memory");
+            const memory_log = try Log.init(allocator, log_memory_opts);
+
             return Self{
                 .allocator = allocator,
                 .inbox = std.ArrayList(RpcMessage).init(allocator),
                 .next_index = &[_]usize{},
                 .match_index = &[_]usize{},
                 .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
-                .log = Log.init(allocator),
+                .log = memory_log,
                 .nodes_buffer = nodes,
                 .state_machine = sm,
                 .config = types.RaftConfig{
                     .self_id = id,
                     .nodes = nodes.items,
-                     //TODO
+                    //TODO
                     .snapshots_enabled = false,
                 },
             };
@@ -77,11 +87,14 @@ pub fn RaftNode(comptime T: type) type {
             self.leader_id = null;
 
             // Determine last log index and term
-            const last_log_index =
-                if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+            // const last_log_index =
+            //     if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+            const last_log_index = self.log.getLastIndex();
 
-            const last_log_term =
-                if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+            // const last_log_term =
+            //     if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+
+            const last_log_term = self.log.getLastTerm();
 
             const req = types.RequestVote{
                 .term = self.current_term,
@@ -144,8 +157,12 @@ pub fn RaftNode(comptime T: type) type {
 
             while (self.last_applied < self.commit_index) {
                 self.last_applied += 1;
-                const entry = self.log.get(self.last_applied - 1) orelse continue;
-                self.applyLog(entry);
+                // const entry = self.log.get(self.last_applied - 1) orelse continue;
+                const entry = self.log.getEntry(self.last_applied - 1) orelse continue;
+
+                //FIXME
+                // self.applyLog(entry);
+                _ = entry;
             }
         }
 
@@ -223,7 +240,8 @@ pub fn RaftNode(comptime T: type) type {
                             const majority_idx = temp[@divFloor(temp.len, 2)];
 
                             if (majority_idx > self.commit_index) {
-                                const term_at = self.log.termAt(majority_idx);
+                                // const term_at = self.log.termAt(majority_idx);
+                                const term_at = self.log.getTermAtIndex(majority_idx);
                                 if (term_at) |term_at_val| {
                                     if (term_at_val == self.current_term) {
                                         self.commit_index = majority_idx;
@@ -259,11 +277,13 @@ pub fn RaftNode(comptime T: type) type {
             var vote_granted = false;
 
             const candidate_up_to_date = blk: {
-                const last_log_index =
-                    if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+                // const last_log_index =
+                //     if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
+                const last_log_index = self.log.getLastIndex();
 
-                const last_log_term =
-                    if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+                // const last_log_term =
+                //     if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
+                const last_log_term = self.log.getLastTerm();
 
                 if (req.last_log_term > last_log_term) break :blk true;
                 if (req.last_log_term < last_log_term) break :blk false;
@@ -320,7 +340,8 @@ pub fn RaftNode(comptime T: type) type {
             }
 
             // Log consistency check
-            const prev_log_term = self.log.termAt(req.prev_log_index);
+            // const prev_log_term = self.log.termAt(req.prev_log_index);
+            const prev_log_term = self.log.getTermAtIndex(req.prev_log_index);
             if (prev_log_term == null or prev_log_term.? != req.prev_log_term) {
                 const resp = types.AppendEntriesResponse{
                     .term = self.current_term,
@@ -340,14 +361,26 @@ pub fn RaftNode(comptime T: type) type {
             var i: usize = 0;
             while (i < req.entries.len) {
                 const index = req.prev_log_index + 1 + i;
-                const existing = self.log.get(index);
+                // const existing = self.log.get(index);
+                const existing = self.log.getEntry(index);
 
                 if (existing == null or existing.?.term != req.entries[i].term) {
                     // Truncate and append
-                    self.log.truncate(index);
-                    _ = self.log.entries.appendSlice(req.entries[i..]) catch {
-                        std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
+                    // self.log.truncate(index);
+                    self.log.truncateFrom(index) catch {
+                        std.debug.print("Failed to truncate entries; index: {}\n", .{ index });
                     };
+
+
+                    //FIXME
+                    // v1
+                    // _ = self.log.entries.appendSlice(req.entries[i..]) catch {
+                    //     std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
+                    // };
+                    // v2
+                    // _ = self.log.appendSlice(req.entries[i..]) catch {
+                    //     std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
+                    // };
                     break;
                 }
 
@@ -356,7 +389,8 @@ pub fn RaftNode(comptime T: type) type {
 
             // Update commit index
             if (req.leader_commit > self.commit_index) {
-                const new_commit = @min(req.leader_commit, self.log.lastIndex());
+                // const new_commit = @min(req.leader_commit, self.log.lastIndex());
+                const new_commit = @min(req.leader_commit, self.log.getLastIndex());
                 self.commit_index = new_commit;
                 _ = self.applyCommitted(); // Apply entries to state machine
             }
@@ -373,9 +407,14 @@ pub fn RaftNode(comptime T: type) type {
 
         fn applyCommitted(self: *RaftNode(T)) void {
             while (self.last_applied < self.commit_index) {
-                const entry = self.log.get(self.last_applied) orelse break;
+                // const entry = self.log.get(self.last_applied) orelse break;
+                const entry = self.log.getEntry(self.last_applied) orelse break;
+                //FIXME
                 if (self.state_machine) |sm| {
-                    sm.applyLog(entry);
+                    // sm.applyLog(entry);
+                    // sm.applyLog(entry.*);
+                    _ = entry;
+                    _ = sm;
                 }
 
                 self.last_applied += 1;
@@ -422,7 +461,8 @@ pub fn RaftNode(comptime T: type) type {
                 const majority = (self.config.nodes.len / 2) + 1;
                 var new_commit_index = self.commit_index + 1;
 
-                while (new_commit_index <= self.log.entries.items.len) : (new_commit_index += 1) {
+                // while (new_commit_index <= self.log.entries.items.len) : (new_commit_index += 1) {
+                while (new_commit_index <= self.log.getLastIndex()) : (new_commit_index += 1) {
                     var replicated_count: usize = 1; // count self
                     for (self.match_index) |idx| {
                         if (idx >= new_commit_index) replicated_count += 1;
@@ -430,7 +470,8 @@ pub fn RaftNode(comptime T: type) type {
 
                     // Only commit entries from current term
                     if (replicated_count >= majority and
-                        self.log.termAt(new_commit_index - 1) == self.current_term)
+                        // self.log.termAt(new_commit_index - 1) == self.current_term)
+                        self.log.getTermAtIndex(new_commit_index - 1) == self.current_term)
                     {
                         self.commit_index = new_commit_index;
 
@@ -448,8 +489,15 @@ pub fn RaftNode(comptime T: type) type {
                                 .term = self.current_term,
                                 .leader_id = self.config.self_id,
                                 .prev_log_index = next_idx - 1,
-                                .prev_log_term = self.log.termAt(next_idx - 1) orelse 0,
-                                .entries = self.log.sliceFrom(next_idx),
+
+                                // .prev_log_term = self.log.termAt(next_idx - 1) orelse 0,
+                                .prev_log_term = self.log.getTermAtIndex(next_idx - 1) orelse 0,
+
+                                //FIXME
+                                // .entries = self.log.sliceFrom(next_idx),
+                                // .entries = try self.log.sliceFrom(self.allocator, next_idx),
+                                .entries = &[_]LogEntry{},
+
                                 .leader_commit = self.commit_index,
                             };
 
@@ -473,11 +521,37 @@ pub fn RaftNode(comptime T: type) type {
 
                 const next_idx = self.next_index[i];
                 const prev_log_index = if (next_idx > 0) next_idx - 1 else 0;
-                const prev_log_term = self.log.termAt(prev_log_index) orelse 0;
+                // const prev_log_term = self.log.termAt(prev_log_index) orelse 0;
+                const prev_log_term = self.log.getTermAtIndex(prev_log_index) orelse 0;
 
-                // Fetch entries to send starting at next_idx
-                const all_entries = self.log.entries.items;
-                const to_send = if (next_idx < all_entries.len) all_entries[next_idx..] else &[_]LogEntry{};
+                //v1
+                // // Fetch entries to send starting at next_idx
+                // const all_entries = self.log.entries.items;
+                // const to_send = if (next_idx < all_entries.len) all_entries[next_idx..] else &[_]LogEntry{};
+
+                //v2
+                const last_index = self.log.getLastIndex();
+                const start_index = next_idx + 1; // Convert to 1-based Raft indexing
+
+                // Collect entries to send
+                // var entries_to_send = std.ArrayList(LogEntry).init(allocator);
+                var entries_to_send = std.ArrayList(LogEntry).init(self.allocator);
+                defer entries_to_send.deinit();
+
+                var current_index = start_index;
+                while (current_index <= last_index) {
+                    //FIXME
+                    if (self.log.getEntry(current_index)) |x| {
+                        // try entries_to_send.append(x.*); // Dereference the pointer
+                        // try entries_to_send.append(x.*); // Dereference the pointer
+                        _ = x;
+                    }
+                    current_index += 1;
+                }
+
+                const to_send = entries_to_send.items;
+                //
+                //
 
                 const req = types.AppendEntries{
                     .term = self.current_term,
@@ -566,7 +640,8 @@ pub fn RaftNode(comptime T: type) type {
 
             for (cluster.nodes.items, 0..) |node, i| {
                 try self.node_id_to_index.put(node.config.self_id, i);
-                self.next_index[i] = self.log.lastIndex() + 1;
+                // self.next_index[i] = self.log.lastIndex() + 1;
+                self.next_index[i] = self.log.getLastIndex() + 1;
                 self.match_index[i] = 0;
             }
 
@@ -584,7 +659,8 @@ pub fn RaftNode(comptime T: type) type {
             // 2. Save snapshot
             self.snapshot = types.Snapshot{
                 .last_included_index = last_index,
-                .last_included_term = self.log.termAt(last_index - 1).?,
+                // .last_included_term = self.log.termAt(last_index - 1).?,
+                .last_included_term = self.log.getTermAtIndex(last_index - 1).?,
                 .state_data = try self.allocator.dupe(u8, buffer.items),
             };
 
@@ -592,6 +668,7 @@ pub fn RaftNode(comptime T: type) type {
             try self.log.truncatePrefix(last_index);
         }
 
+        //TODO
         fn installSnapshot(self: *RaftNode(T), snap: types.InstallSnapshot, cluster: *Cluster(T)) !void {
             if (snap.term < self.current_term) return;
 
@@ -601,7 +678,7 @@ pub fn RaftNode(comptime T: type) type {
             self.resetElectionTimeout();
 
             // Discard old log entries
-            self.log.truncate(snap.last_included_index + 1);
+            // self.log.truncate(snap.last_included_index + 1);
 
             // Set snapshot point
             self.snapshot_index = snap.last_included_index;
@@ -612,7 +689,7 @@ pub fn RaftNode(comptime T: type) type {
 
             // Update log
             // FIXME - move to snapshot
-            try self.log.replaceWithSnapshotPoint(snap.last_included_index, snap.last_included_term);
+            // try self.log.replaceWithSnapshotPoint(snap.last_included_index, snap.last_included_term);
             self.commit_index = snap.last_included_index;
             self.last_applied = snap.last_included_index;
 
@@ -632,7 +709,6 @@ pub fn RaftNode(comptime T: type) type {
                 std.debug.print("Node {} stepped down, asked node {} to take over\n", .{ self.id, target_id });
             }
         }
-
     };
 }
 

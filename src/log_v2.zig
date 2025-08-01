@@ -3,22 +3,30 @@ const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const crc32 = std.hash.crc.Crc32;
 
+pub const LogConfig = struct {
+    storage_type: enum { memory, persistent },
+    data_dir: ?[]const u8 = null,
+};
+
+// Assuming existing LogEntry structure
 pub const LogEntry = struct {
     term: u64,
     index: u64,
     data: []const u8,
 
-    pub fn serialize(self: *const LogEntry, writer: anytype) !void {
-        try writer.writeIntLittleEndian(u64, self.term);
-        try writer.writeIntLittleEndian(u64, self.index);
-        try writer.writeIntLittleEndian(u64, self.data.len);
+    pub fn serialize(self: *const LogEntry, writer: std.fs.File.Writer) !void {
+        try writer.writeInt(u64, self.term, .little);
+        try writer.writeInt(u64, self.index, .little);
+        try writer.writeInt(u64, self.data.len, .little);
         try writer.writeAll(self.data);
     }
 
+    //TODO
+    // , reader: std.fs.File.Reader
     pub fn deserialize(allocator: Allocator, reader: anytype) !LogEntry {
-        const term = try reader.readIntLittleEndian(u64);
-        const index = try reader.readIntLittleEndian(u64);
-        const data_len = try reader.readIntLittleEndian(u64);
+        const term = try reader.readInt(u64, .little);
+        const index = try reader.readInt(u64, .little);
+        const data_len = try reader.readInt(u64, .little);
 
         const data = try allocator.alloc(u8, data_len);
         try reader.readNoEof(data);
@@ -37,18 +45,18 @@ pub const PersistentState = struct {
     voted_for: ?u32, // node_id or null
 
     pub fn serialize(self: *const PersistentState, writer: anytype) !void {
-        try writer.writeIntLittleEndian(u64, self.current_term);
+        try writer.writeInt(u64, self.current_term, .little);
         const has_vote = self.voted_for != null;
-        try writer.writeBool(has_vote);
+        try writer.writeByte(if (has_vote) 1 else 0);
         if (has_vote) {
-            try writer.writeIntLittleEndian(u32, self.voted_for.?);
+            try writer.writeInt(u32, self.voted_for.?, .little);
         }
     }
 
     pub fn deserialize(reader: anytype) !PersistentState {
-        const current_term = try reader.readIntLittleEndian(u64);
-        const has_vote = try reader.readBool();
-        const voted_for = if (has_vote) try reader.readIntLittleEndian(u32) else null;
+        const current_term = try reader.readInt(u64, .little);
+        const has_vote = (try reader.readByte()) != 0;
+        const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
 
         return PersistentState{
             .current_term = current_term,
@@ -77,43 +85,75 @@ pub const WALRecord = struct {
     },
 
     pub fn serialize(self: *const WALRecord, writer: anytype) !void {
-        try writer.writeIntLittleEndian(u8, @intFromEnum(self.record_type));
+        try writer.writeByte(@intFromEnum(self.record_type));
 
         switch (self.record_type) {
             .append_entry => try self.data.append_entry.serialize(writer),
-            .truncate_from => try writer.writeIntLittleEndian(u64, self.data.truncate_from),
-            .update_term => try writer.writeIntLittleEndian(u64, self.data.update_term),
+            .truncate_from => try writer.writeInt(u64, self.data.truncate_from, .little),
+            .update_term => try writer.writeInt(u64, self.data.update_term, .little),
             .set_voted_for => {
                 const has_vote = self.data.set_voted_for != null;
-                try writer.writeBool(has_vote);
+                try writer.writeByte(if (has_vote) 1 else 0);
                 if (has_vote) {
-                    try writer.writeIntLittleEndian(u32, self.data.set_voted_for.?);
+                    try writer.writeInt(u32, self.data.set_voted_for.?, .little);
                 }
             },
             .checkpoint => {}, // No data for checkpoint
         }
     }
 
+    // pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
+    //     const record_type_raw = try reader.readByte();
+    //     const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
+
+    //     const data = switch (record_type) {
+    //         .append_entry => .{ .append_entry = try LogEntry.deserialize(allocator, reader) },
+    //         .truncate_from => .{ .truncate_from = try reader.readInt(u64, .little) },
+    //         .update_term => .{ .update_term = try reader.readInt(u64, .little) },
+    //         .set_voted_for => blk: {
+    //             const has_vote = (try reader.readByte()) != 0;
+    //             const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
+    //             break :blk .{ .set_voted_for = voted_for };
+    //         },
+    //         .checkpoint => .{ .checkpoint = {} },
+    //     };
+
+    //     return WALRecord{
+    //         .record_type = record_type,
+    //         .data = data,
+    //     };
+    // }
+
     pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
-        const record_type_raw = try reader.readIntLittleEndian(u8);
+        const record_type_raw = try reader.readByte();
         const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
 
-        const data = switch (record_type) {
-            .append_entry => .{ .append_entry = try LogEntry.deserialize(allocator, reader) },
-            .truncate_from => .{ .truncate_from = try reader.readIntLittleEndian(u64) },
-            .update_term => .{ .update_term = try reader.readIntLittleEndian(u64) },
-            .set_voted_for => blk: {
-                const has_vote = try reader.readBool();
-                const voted_for = if (has_vote) try reader.readIntLittleEndian(u32) else null;
-                break :blk .{ .set_voted_for = voted_for };
-            },
-            .checkpoint => .{ .checkpoint = {} },
+        var record = WALRecord{
+            .record_type = record_type,
+            .data = undefined,
         };
 
-        return WALRecord{
-            .record_type = record_type,
-            .data = data,
-        };
+        switch (record_type) {
+            .append_entry => {
+                record.data = .{ .append_entry = try LogEntry.deserialize(allocator, reader) };
+            },
+            .truncate_from => {
+                record.data = .{ .truncate_from = try reader.readInt(u64, .little) };
+            },
+            .update_term => {
+                record.data = .{ .update_term = try reader.readInt(u64, .little) };
+            },
+            .set_voted_for => {
+                const has_vote = (try reader.readByte()) != 0;
+                const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
+                record.data = .{ .set_voted_for = voted_for };
+            },
+            .checkpoint => {
+                record.data = .{ .checkpoint = {} };
+            },
+        }
+
+        return record;
     }
 };
 
@@ -281,7 +321,8 @@ pub const PersistentLog = struct {
     fn flushWAL(self: *PersistentLog) !void {
         if (self.wal_buffer.items.len == 0) return;
 
-        try self.wal_file.seekToEnd();
+        const file_size = try self.wal_file.getEndPos();
+        try self.wal_file.seekTo(file_size);
         const writer = self.wal_file.writer();
 
         for (self.wal_buffer.items) |*record| {
@@ -340,7 +381,7 @@ pub const PersistentLog = struct {
         var reader = self.state_file.reader();
 
         // Verify magic header
-        const magic = try reader.readIntLittleEndian(u32);
+        const magic = try reader.readInt(u32, .little);
         if (magic != MAGIC_HEADER) {
             return error.CorruptedStateFile;
         }
@@ -358,13 +399,13 @@ pub const PersistentLog = struct {
         var reader = self.log_file.reader();
 
         // Verify magic header
-        const magic = try reader.readIntLittleEndian(u32);
+        const magic = try reader.readInt(u32, .little);
         if (magic != MAGIC_HEADER) {
             return error.CorruptedLogFile;
         }
 
         // Read stored CRC32
-        const stored_crc = try reader.readIntLittleEndian(u32);
+        const stored_crc = try reader.readInt(u32, .little);
 
         // Read all data
         const data_start = try self.log_file.getPos();
@@ -380,10 +421,12 @@ pub const PersistentLog = struct {
         }
 
         // Parse data
-        var data_reader = std.io.fixedBufferStream(data).reader();
+        var data_stream = std.io.fixedBufferStream(data);
+        var data_reader = data_stream.reader();
 
         // Read number of entries
-        const num_entries = try data_reader.readIntLittleEndian(u64);
+        // const num_entries = try data_reader.readIntLittleEndian(u64);
+        const num_entries = try data_reader.readInt(u64, .little);
 
         // Load each entry
         var i: u64 = 0;
@@ -411,8 +454,8 @@ pub const PersistentLog = struct {
         try self.state_file.seekTo(0);
         var writer = self.state_file.writer();
 
-        try writer.writeIntLittleEndian(u32, MAGIC_HEADER);
-        try writer.writeIntLittleEndian(u32, data_crc);
+        try writer.writeInt(u32, MAGIC_HEADER, .little);
+        try writer.writeInt(u32, data_crc, .little);
         try writer.writeAll(data_buffer.items);
         try self.state_file.sync();
     }
@@ -532,9 +575,12 @@ pub const PersistentLog = struct {
         return self.entries.items[self.entries.items.len - 1].term;
     }
 
-    // Force flush WAL - useful for ensuring durability at critical points
-    pub fn forceSync(self: *PersistentLog) !void {
-        try self.flushWAL();
+    pub fn getCurrentTerm(self: *PersistentLog) u64 {
+        return self.persistent_state.current_term;
+    }
+
+    pub fn getVotedFor(self: *PersistentLog) ?u32 {
+        return self.persistent_state.voted_for;
     }
 };
 
@@ -636,28 +682,23 @@ pub const MemoryLog = struct {
     }
 };
 
-
-// FIXME
-pub const LogConfig = struct {
-    storage_type: enum { memory, persistent },
-    data_dir: ?[]const u8 = null,
-};
-
+// Modified Log interface to support both memory and persistent storage
 pub const Log = union(enum) {
     memory: MemoryLog,
     persistent: PersistentLog,
 
-    pub fn init(allocator: Allocator, config: LogConfig) !Log {
-        switch (config.storage_type) {
-            .memory => {
-                const memory_log = try MemoryLog.init(allocator);
-                return Log{ .memory = memory_log };
-            },
-            .persistent => {
-                const data_dir = config.data_dir orelse return error.DataDirRequired;
-                const persistent_log = try PersistentLog.init(allocator, data_dir);
-                return Log{ .persistent = persistent_log };
-            },
+    pub fn init(allocator: Allocator, opts: std.StringHashMap([]const u8)) !Log {
+        const storage_type_str = opts.get("storage_type") orelse "memory";
+
+        if (std.mem.eql(u8, storage_type_str, "memory")) {
+            const memory_log = try MemoryLog.init(allocator);
+            return Log{ .memory = memory_log };
+        } else if (std.mem.eql(u8, storage_type_str, "persistent")) {
+            const data_dir = opts.get("data_dir") orelse return error.DataDirRequired;
+            const persistent_log = try PersistentLog.init(allocator, data_dir);
+            return Log{ .persistent = persistent_log };
+        } else {
+            return error.InvalidStorageType;
         }
     }
 
@@ -752,5 +793,29 @@ pub const Log = union(enum) {
             .memory => |*memory_log| return memory_log.forceSync(),
             .persistent => |*persistent_log| return persistent_log.forceSync(),
         }
+    }
+
+    pub fn getTermAtIndex(self: *Log, index: u64) ?u64 {
+        // if (const entry = self.getEntry(index)) {
+        if (self.getEntry(index)) |x| {
+            return x.term;
+        }
+        return null; // Index doesn't exist
+    }
+
+    pub fn sliceFrom(self: *Log, allocator: Allocator, start_index: u64) ![]LogEntry {
+        const last_index = self.getLastIndex();
+        if (start_index > last_index) {
+            return &[_]LogEntry{}; // Empty slice
+        }
+
+        var entries = std.ArrayList(LogEntry).init(allocator);
+        var i = start_index;
+        while (i <= last_index) : (i += 1) {
+            if (self.getEntry(i)) |entry| {
+                try entries.append(entry.*);
+            }
+        }
+        return entries.toOwnedSlice();
     }
 };
