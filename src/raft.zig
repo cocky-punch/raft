@@ -34,9 +34,6 @@ pub fn RaftNode(comptime T: type) type {
         match_index: []usize, // for each follower: highest log entry known to be replicated
         node_id_to_index: std.AutoHashMap(NodeId, usize),
         last_applied: usize = 0,
-
-        // state_machine: anytype,
-        // state_machine: ?*T,
         state_machine: ?StateMachine(T) = null,
         snapshot: ?types.Snapshot = null,
         snapshot_index: usize = 0,
@@ -83,14 +80,12 @@ pub fn RaftNode(comptime T: type) type {
             self.leader_id = null;
 
             // Determine last log index and term
-            // const last_log_index =
-            //     if (self.log.entries.items.len > 0) self.log.entries.items.len - 1 else 0;
-            const last_log_index = self.log.getLastIndex();
+            const last_log_index0 = self.log.getLastIndex();
+            const last_log_index = if (last_log_index0 > 0) last_log_index0 - 1 else 0;
 
-            // const last_log_term =
-            //     if (self.log.entries.items.len > 0) self.log.entries.items[last_log_index].term else 0;
-
-            const last_log_term = self.log.getLastTerm();
+            const last_log_term0 = self.log.getLastTerm();
+            const last_log_term = if (last_log_term0 > 0) last_log_term0 - 1 else 0;
+            //
 
             const req = types.RequestVote{
                 .term = self.current_term,
@@ -232,7 +227,6 @@ pub fn RaftNode(comptime T: type) type {
                             const majority_idx = temp[@divFloor(temp.len, 2)];
 
                             if (majority_idx > self.commit_index) {
-                                // const term_at = self.log.termAt(majority_idx);
                                 const term_at = self.log.getTermAtIndex(majority_idx);
                                 if (term_at) |term_at_val| {
                                     if (term_at_val == self.current_term) {
@@ -332,7 +326,6 @@ pub fn RaftNode(comptime T: type) type {
             }
 
             // Log consistency check
-            // const prev_log_term = self.log.termAt(req.prev_log_index);
             const prev_log_term = self.log.getTermAtIndex(req.prev_log_index);
             if (prev_log_term == null or prev_log_term.? != req.prev_log_term) {
                 const resp = types.AppendEntriesResponse{
@@ -343,7 +336,7 @@ pub fn RaftNode(comptime T: type) type {
                 };
 
                 _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {
-                    std.debug.print("Failed to send AppendEntriesResponse to node_id: {}\n", .{req.leader_id});
+                    std.log.err("Failed to send AppendEntriesResponse to node_id: {}\n", .{req.leader_id});
                 };
 
                 return;
@@ -353,7 +346,6 @@ pub fn RaftNode(comptime T: type) type {
             var i: usize = 0;
             while (i < req.entries.len) {
                 const index = req.prev_log_index + 1 + i;
-                // const existing = self.log.get(index);
                 const existing = self.log.getEntry(index);
 
                 if (existing == null or existing.?.term != req.entries[i].term) {
@@ -373,7 +365,6 @@ pub fn RaftNode(comptime T: type) type {
 
             // Update commit index
             if (req.leader_commit > self.commit_index) {
-                // const new_commit = @min(req.leader_commit, self.log.lastIndex());
                 const new_commit = @min(req.leader_commit, self.log.getLastIndex());
                 self.commit_index = new_commit;
                 _ = self.applyCommitted(); // Apply entries to state machine
@@ -449,7 +440,6 @@ pub fn RaftNode(comptime T: type) type {
 
                     // Only commit entries from current term
                     if (replicated_count >= majority and
-                        // self.log.termAt(new_commit_index - 1) == self.current_term)
                         self.log.getTermAtIndex(new_commit_index - 1) == self.current_term)
                     {
                         self.commit_index = new_commit_index;
@@ -611,7 +601,6 @@ pub fn RaftNode(comptime T: type) type {
 
             for (cluster.nodes.items, 0..) |node, i| {
                 try self.node_id_to_index.put(node.config.self_id, i);
-                // self.next_index[i] = self.log.lastIndex() + 1;
                 self.next_index[i] = self.log.getLastIndex() + 1;
                 self.match_index[i] = 0;
             }
@@ -630,7 +619,6 @@ pub fn RaftNode(comptime T: type) type {
             // 2. Save snapshot
             self.snapshot = types.Snapshot{
                 .last_included_index = last_index,
-                // .last_included_term = self.log.termAt(last_index - 1).?,
                 .last_included_term = self.log.getTermAtIndex(last_index - 1).?,
                 .state_data = try self.allocator.dupe(u8, buffer.items),
             };
