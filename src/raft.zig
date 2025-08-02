@@ -463,20 +463,17 @@ pub fn RaftNode(comptime T: type) type {
 
                             const idx = self.node_id_to_index.get(follower.config.self_id) orelse continue;
                             const next_idx = self.next_index[idx];
+                            const sliced_entries = self.log.sliceFrom(self.allocator, next_idx) catch |err| blk: {
+                                std.log.err("log.sliceFrom failed: {}", .{err});
+                                break :blk &[_]LogEntry{}; // Empty slice
+                            };
 
                             const ae = types.AppendEntries{
                                 .term = self.current_term,
                                 .leader_id = self.config.self_id,
                                 .prev_log_index = next_idx - 1,
-
-                                // .prev_log_term = self.log.termAt(next_idx - 1) orelse 0,
                                 .prev_log_term = self.log.getTermAtIndex(next_idx - 1) orelse 0,
-
-                                //FIXME
-                                // .entries = self.log.sliceFrom(next_idx),
-                                // .entries = try self.log.sliceFrom(self.allocator, next_idx),
-                                .entries = &[_]LogEntry{},
-
+                                .entries = @constCast(sliced_entries),
                                 .leader_commit = self.commit_index,
                             };
 
@@ -500,7 +497,6 @@ pub fn RaftNode(comptime T: type) type {
 
                 const next_idx = self.next_index[i];
                 const prev_log_index = if (next_idx > 0) next_idx - 1 else 0;
-                // const prev_log_term = self.log.termAt(prev_log_index) orelse 0;
                 const prev_log_term = self.log.getTermAtIndex(prev_log_index) orelse 0;
 
                 //v1
@@ -513,31 +509,27 @@ pub fn RaftNode(comptime T: type) type {
                 const start_index = next_idx + 1; // Convert to 1-based Raft indexing
 
                 // Collect entries to send
-                // var entries_to_send = std.ArrayList(LogEntry).init(allocator);
                 var entries_to_send = std.ArrayList(LogEntry).init(self.allocator);
                 defer entries_to_send.deinit();
 
                 var current_index = start_index;
                 while (current_index <= last_index) {
-                    //FIXME
                     if (self.log.getEntry(current_index)) |x| {
                         entries_to_send.append(x.*) catch {
-                            // std.debug.print("Failed to append element {} to entries_to_send {}\n", .{x.*});
+                            std.log.err("Failed to append element {} to entries_to_send\n", .{x.*});
                         };
                     }
                     current_index += 1;
                 }
 
                 const to_send = entries_to_send.items;
-                //
-                //
 
                 const req = types.AppendEntries{
                     .term = self.current_term,
                     .leader_id = self.config.self_id,
                     .prev_log_index = prev_log_index,
                     .prev_log_term = prev_log_term,
-                    .entries = @constCast(to_send), // heartbeat → no new entries
+                    .entries = to_send, // heartbeat → no new entries
                     .leader_commit = self.commit_index,
                 };
 
