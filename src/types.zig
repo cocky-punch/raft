@@ -1,10 +1,12 @@
 const std = @import("std");
+
 pub const Command = @import("command.zig").Command;
 pub const CommandWithId = @import("command.zig").CommandWithId;
-const LogEntry = @import("log_entry.zig").LogEntry;
+const LogEntry = @import("log_v2.zig").LogEntry;
 
 pub const Term = u64;
 pub const NodeId = u64;
+
 pub const PeerAddress = struct {
     ip: []const u8,
     port: u16,

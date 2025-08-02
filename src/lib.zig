@@ -6,6 +6,6 @@ pub const loadConfig = @import("config.zig").loadConfig;
 pub const RawConfig = @import("config.zig").RawConfig;
 pub const RawPeer = @import("config.zig").RawPeer;
 pub const StateMachine = @import("state_machine.zig").StateMachine;
-pub const LogEntry = @import("log_entry.zig").LogEntry;
+pub const LogEntry = @import("log_v2.zig").LogEntry;
 pub const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
 pub const sendFramedRpc = @import("raft_tcp_server.zig").sendFramedRpc;

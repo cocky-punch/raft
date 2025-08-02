@@ -1,7 +1,7 @@
 const std = @import("std");
 const raft = @import("raft.zig");
 const RaftNode = raft.RaftNode;
-const LogEntry = @import("log_entry.zig").LogEntry;
+const LogEntry = @import("log_v2.zig").LogEntry;
 const cfg = @import("config.zig");
 
 // TODO debug

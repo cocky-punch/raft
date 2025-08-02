@@ -6,13 +6,9 @@ pub const StateMachine = @import("state_machine.zig").StateMachine;
 const RaftState = types.RaftState;
 const NodeId = types.NodeId;
 const RpcMessage = types.RpcMessage;
-
-//TODO
-// const Log = @import("log_v1.zig").Log;
 const Log = @import("log_v2.zig").Log;
-
+const LogEntry = @import("log_v2.zig").LogEntry;
 const Command = @import("command.zig").Command;
-const LogEntry = @import("log_entry.zig").LogEntry;
 const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
 const ElectionTimeoutBase: u64 = 150;
 const ElectionTimeoutJitter: u64 = 150;
@@ -368,9 +364,8 @@ pub fn RaftNode(comptime T: type) type {
                     // Truncate and append
                     // self.log.truncate(index);
                     self.log.truncateFrom(index) catch {
-                        std.debug.print("Failed to truncate entries; index: {}\n", .{ index });
+                        std.debug.print("Failed to truncate entries; index: {}\n", .{index});
                     };
-
 
                     //FIXME
                     // v1
@@ -407,14 +402,9 @@ pub fn RaftNode(comptime T: type) type {
 
         fn applyCommitted(self: *RaftNode(T)) void {
             while (self.last_applied < self.commit_index) {
-                // const entry = self.log.get(self.last_applied) orelse break;
                 const entry = self.log.getEntry(self.last_applied) orelse break;
-                //FIXME
                 if (self.state_machine) |sm| {
-                    // sm.applyLog(entry);
-                    // sm.applyLog(entry.*);
-                    _ = entry;
-                    _ = sm;
+                    sm.applyLog(entry.*);
                 }
 
                 self.last_applied += 1;
@@ -542,9 +532,9 @@ pub fn RaftNode(comptime T: type) type {
                 while (current_index <= last_index) {
                     //FIXME
                     if (self.log.getEntry(current_index)) |x| {
-                        // try entries_to_send.append(x.*); // Dereference the pointer
-                        // try entries_to_send.append(x.*); // Dereference the pointer
-                        _ = x;
+                        entries_to_send.append(x.*) catch {
+                            // std.debug.print("Failed to append element {} to entries_to_send {}\n", .{x.*});
+                        };
                     }
                     current_index += 1;
                 }
