@@ -102,28 +102,6 @@ pub const WALRecord = struct {
         }
     }
 
-    // pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
-    //     const record_type_raw = try reader.readByte();
-    //     const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
-
-    //     const data = switch (record_type) {
-    //         .append_entry => .{ .append_entry = try LogEntry.deserialize(allocator, reader) },
-    //         .truncate_from => .{ .truncate_from = try reader.readInt(u64, .little) },
-    //         .update_term => .{ .update_term = try reader.readInt(u64, .little) },
-    //         .set_voted_for => blk: {
-    //             const has_vote = (try reader.readByte()) != 0;
-    //             const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
-    //             break :blk .{ .set_voted_for = voted_for };
-    //         },
-    //         .checkpoint => .{ .checkpoint = {} },
-    //     };
-
-    //     return WALRecord{
-    //         .record_type = record_type,
-    //         .data = data,
-    //     };
-    // }
-
     pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
         const record_type_raw = try reader.readByte();
         const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));

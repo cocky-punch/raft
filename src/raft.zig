@@ -153,21 +153,17 @@ pub fn RaftNode(comptime T: type) type {
 
             while (self.last_applied < self.commit_index) {
                 self.last_applied += 1;
-                // const entry = self.log.get(self.last_applied - 1) orelse continue;
                 const entry = self.log.getEntry(self.last_applied - 1) orelse continue;
-
-                //FIXME
-                // self.applyLog(entry);
-                _ = entry;
+                self.applyLog(entry.*);
             }
         }
 
         fn applyLog(self: *RaftNode(T), entry: LogEntry) void {
             if (self.state_machine) |sm| {
                 sm.applyLog(entry);
-                std.debug.print("Applied entry at index {}: {}\n", .{
+                std.debug.print("Applied entry at index {}: {any}\n", .{
                     self.last_applied,
-                    entry.command,
+                    entry.data,
                 });
             }
         }
@@ -362,20 +358,13 @@ pub fn RaftNode(comptime T: type) type {
 
                 if (existing == null or existing.?.term != req.entries[i].term) {
                     // Truncate and append
-                    // self.log.truncate(index);
                     self.log.truncateFrom(index) catch {
                         std.debug.print("Failed to truncate entries; index: {}\n", .{index});
                     };
 
-                    //FIXME
-                    // v1
-                    // _ = self.log.entries.appendSlice(req.entries[i..]) catch {
-                    //     std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
-                    // };
-                    // v2
-                    // _ = self.log.appendSlice(req.entries[i..]) catch {
-                    //     std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
-                    // };
+                    _ = self.log.appendSlice(req.entries[i..]) catch {
+                        std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
+                    };
                     break;
                 }
 
