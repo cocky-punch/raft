@@ -1,10 +1,14 @@
 const std = @import("std");
-pub const Command = @import("command.zig").Command;
-pub const CommandWithId = @import("command.zig").CommandWithId;
-const LogEntry = @import("log_entry.zig").LogEntry;
+
+// pub const Command = @import("command.zig").Command;
+// pub const CommandWithId = @import("command.zig").CommandWithId;
+// pub const Command = @import("command_v2.zig").Command;
+pub const Command = @import("command_v3.zig").Command;
+const LogEntry = @import("log.zig").LogEntry;
 
 pub const Term = u64;
 pub const NodeId = u64;
+
 pub const PeerAddress = struct {
     ip: []const u8,
     port: u16,
@@ -15,10 +19,20 @@ pub const Node = struct {
     address: PeerAddress,
 };
 
-pub const RaftConfig = struct {
-    self_id: NodeId,
-    nodes: []const Node, // includes self
-};
+//TODO
+// pub const RaftConfig = struct {
+//     self_id: NodeId,
+//     nodes: []const Node, // includes self
+//     snapshots_enabled: bool,
+//     read_consistency: ReadConsistency = .eventual,
+//     leader_lease_timeout_ms: ?u32 = null, // 150ms for lease-based reads
+// };
+
+// pub const ReadConsistency = enum {
+//     eventual, // Fast reads, may not be linearizable
+//     linearizable, // Slower, but guaranteed linearizable
+//     lease_based, // Fast + linearizable with leader lease
+// };
 
 pub const RaftState = enum {
     Follower,
@@ -96,7 +110,16 @@ pub const RpcMessage = union(enum) {
 pub const Snapshot = struct {
     last_included_index: usize,
     last_included_term: usize,
-    state_data: []u8, // raw bytes representing the state machine
+    // raw bytes representing the state machine
+    state_data: []u8,
+    // if a disk is utilized
+    file_path: ?[]const u8,
+};
+
+const SnapshotBackend = enum {
+    InMemory,
+    File,
+    // Sqlite, etc.
 };
 
 pub const Transport = union(enum) {

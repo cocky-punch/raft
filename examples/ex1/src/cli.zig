@@ -27,14 +27,14 @@ pub fn main() !void {
 
     const msg =
         if (std.mem.eql(u8, cmd_type, "set")) raft.RpcMessage{
-            .ClientCommand = raft.Command{ .Set = .{ .key = key_owned, .value = value_owned } },
+            .ClientCommand = raft.Command{ .set = .{ .key = key_owned, .value = value_owned } },
         } else if (std.mem.eql(u8, cmd_type, "delete")) raft.RpcMessage{
-            .ClientCommand = raft.Command{ .Delete = .{ .key = key_owned } },
+            .ClientCommand = raft.Command{ .delete = .{ .key = key_owned } },
         } else if (std.mem.eql(u8, cmd_type, "update")) blk: {
             //FIXME
             std.log.debug("[DEBUG] 'update' command isn't implemented", .{});
             // check first whether the key exists
-            break :blk raft.RpcMessage{ .ClientCommand = raft.Command{ .Update = .{ .key = key_owned, .value = value_owned } } };
+            break :blk raft.RpcMessage{ .ClientCommand = raft.Command{ .update = .{ .key = key_owned, .value = value_owned } } };
         } else {
             return error.InvalidCommand;
         };

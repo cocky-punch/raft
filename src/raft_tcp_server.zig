@@ -106,8 +106,9 @@ pub fn RaftTcpServer(comptime T: type) type {
                         try self.pending_acks.put(cmd_id, stream);
 
                         //TODO
-                        try self.local_node.handleClientCommand(cmd);
+                        // try self.local_node.handleClientCommand(cmd);
                         // try self.local_node.handleClientCommand(cmd2);
+                        _ = try self.local_node.handleClientCommandStructured(cmd);
 
                         // const ack = RpcMessage{ .Ack = .{} };
                         const ack = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
@@ -131,22 +132,27 @@ pub fn RaftTcpServer(comptime T: type) type {
             self.pending_acks.deinit();
         }
 
+        //FIXME
         pub fn checkCommittedAcks(self: *Self) !void {
-            while (self.last_checked_log_index < self.local_node.commit_index) {
-                const entry = self.local_node.log.get(self.last_checked_log_index) orelse break;
-                if (entry.command_id) |cmd_id| {
-                    if (self.pending_acks.get(cmd_id)) |stream| {
-                        const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
-                        _ = sendFramedRpc(self.allocator, stream.writer(), ack_msg) catch |err| {
-                            std.log.warn("Failed to send ack for cmd_id {}: {}", .{ cmd_id, err });
-                        };
+            // while (self.last_checked_log_index < self.local_node.commit_index) {
+            //     const entry = self.local_node.log.getEntry(self.last_checked_log_index) orelse break;
+            //     if (entry.command_id) |cmd_id| {
+            //         if (self.pending_acks.get(cmd_id)) |stream| {
+            //             const ack_msg = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
+            //             _ = sendFramedRpc(self.allocator, stream.writer(), ack_msg) catch |err| {
+            //                 std.log.warn("Failed to send ack for cmd_id {}: {}", .{ cmd_id, err });
+            //             };
 
-                        _ = self.pending_acks.remove(cmd_id);
-                    }
-                }
+            //             _ = self.pending_acks.remove(cmd_id);
+            //         }
+            //     }
 
-                self.last_checked_log_index += 1;
-            }
+            //     self.last_checked_log_index += 1;
+            // }
+
+            _ = self;
+
+            std.log.err("not implemented but won't panic either", .{});
         }
     };
 }

@@ -4,9 +4,13 @@ const testing = std.testing;
 const RaftNode = @import("raft.zig").RaftNode;
 const Cluster = @import("raft.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
-const Command = @import("command.zig").Command;
+
+// const Command = @import("command.zig").Command;
+// const Command = @import("command_v2.zig").Command;
+const Command = @import("command_v3.zig").Command;
+
 const StateMachine = @import("state_machine.zig").StateMachine;
-const LogEntry = @import("log_entry.zig").LogEntry;
+const LogEntry = @import("log.zig").LogEntry;
 
 const DummyStateMachine = struct {
     pub fn apply(_: *DummyStateMachine, _: LogEntry) void {

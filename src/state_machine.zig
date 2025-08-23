@@ -1,5 +1,5 @@
 const std = @import("std");
-const LogEntry = @import("log_entry.zig").LogEntry;
+const LogEntry = @import("log.zig").LogEntry;
 
 pub fn StateMachine(comptime T: type) type {
     return struct {

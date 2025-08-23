@@ -7,8 +7,15 @@ const HEARTBEAT_TICK_DURATION_IN_MS = 50;
 
 const MyStateMachine = struct {
     pub fn apply(self: *MyStateMachine, cmd: raft.LogEntry) void {
-        std.debug.print("Applied command: {}\n", .{cmd});
         _ = self;
+        std.debug.print("Applied command: {}\n", .{cmd});
+    }
+
+    //FIXME
+    pub fn queryGet(self: *MyStateMachine, key: []const u8) []const u8 {
+        _ = self;
+        std.debug.print("Applied command queryGet, key: {any}\n", .{key});
+        return &[_]u8{};
     }
 };
 
@@ -28,7 +35,7 @@ pub fn main() !void {
     }
 
     const raft_config_path = config_path orelse return error.MissingConfigArgument;
-    const raft_config = try raft.loadConfig(allocator, raft_config_path);
+    const config = try raft.Config.loadFromFile(allocator, raft_config_path);
 
     // state machine wrapper
     var sm_impl = MyStateMachine{};
@@ -42,11 +49,9 @@ pub fn main() !void {
     const ClusterT = raft.Cluster(MyStateMachine);
 
     var cluster = ClusterT.init(allocator);
-    var node = try Node.init(allocator, raft_config.self_id, sm);
-
-    // Add all node IPs
-    for (raft_config.nodes) |entry| {
-        try cluster.addNodeAddress(entry.id, entry.address);
+    var node = try Node.init(allocator, config.self_id, sm);
+    for (config.peers) |x| {
+        try cluster.addNodeAddress2(x.id, x.ip, x.port);
     }
 
     var server = raft.RaftTcpServer(MyStateMachine).init(
@@ -57,8 +62,8 @@ pub fn main() !void {
     );
 
     const self_port = blk: {
-        for (raft_config.nodes) |n| {
-            if (n.id == raft_config.self_id) break :blk n.address.port;
+        for (config.peers) |x| {
+            if (x.id == config.self_id) break :blk x.port;
         }
         return error.SelfNodeNotInConfig;
     };
