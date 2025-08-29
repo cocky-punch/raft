@@ -11,6 +11,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+
     // Library module (main export)
     const raft_lib = b.addModule("raft", .{
         .root_source_file = b.path("src/lib.zig"),

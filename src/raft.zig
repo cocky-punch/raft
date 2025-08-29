@@ -8,9 +8,9 @@ const NodeId = t.NodeId;
 const RpcMessage = t.RpcMessage;
 const Log = @import("log.zig").Log;
 const LogEntry = @import("log.zig").LogEntry;
-const cmd_module = @import("command_v3.zig");
-const Command = cmd_module.Command;
-const ClientCommandResult = cmd_module.ClientCommandResult;
+const cmd_mod = @import("command_v3.zig");
+const Command = cmd_mod.Command;
+const ClientCommandResult = cmd_mod.ClientCommandResult;
 const cfg = @import("config_v3.zig");
 const Config = cfg.Config;
 
@@ -566,6 +566,7 @@ pub fn RaftNode(comptime T: type) type {
             //     std.log.warn("Heartbeat to peer {} failed", .{peer.id});
             // }
         }
+
         fn updateTermIfNeeded(self: *RaftNode(T), new_term: u64) void {
             if (new_term > self.current_term) {
                 self.current_term = new_term;
@@ -620,7 +621,6 @@ pub fn RaftNode(comptime T: type) type {
                         _ = sm; // Silence unused warning
 
                         // Choose read consistency level based on configuration
-                        // const value = switch (self.config.read_consistency) {
                         const value = switch (self.config.client.read_consistency) {
                             .eventual => try self.handleReadCommand(get_cmd.key),
                             .linearizable => try self.handleLinearizableRead(get_cmd.key),

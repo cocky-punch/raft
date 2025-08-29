@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
     });
     const yaml_module = yaml_dep.module("yaml");
     const raft_module = b.createModule(.{
-        .root_source_file = b.path("../../src/lib.zig"),
+        //.// = b.path("../../src/lib.zig"),
         .imports = &.{
             .{ .name = "yaml", .module = yaml_module },
         },
@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     //
     const exe = b.addExecutable(.{
         .name = "raft_node",
-        .root_source_file = b.path("src/main.zig"),
+        //.root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
     //
     const cli = b.addExecutable(.{
         .name = "raft_cli",
-        .root_source_file = b.path("src/cli.zig"),
+        //.root_source_file = b.path("src/cli.zig"),
         .target = target,
         .optimize = optimize,
     });
