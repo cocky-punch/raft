@@ -1,8 +1,4 @@
 const std = @import("std");
-
-// pub const Command = @import("command.zig").Command;
-// pub const CommandWithId = @import("command.zig").CommandWithId;
-// pub const Command = @import("command_v2.zig").Command;
 pub const Command = @import("command_v3.zig").Command;
 const LogEntry = @import("log.zig").LogEntry;
 
@@ -18,21 +14,6 @@ pub const Node = struct {
     id: NodeId,
     address: PeerAddress,
 };
-
-//TODO
-// pub const RaftConfig = struct {
-//     self_id: NodeId,
-//     nodes: []const Node, // includes self
-//     snapshots_enabled: bool,
-//     read_consistency: ReadConsistency = .eventual,
-//     leader_lease_timeout_ms: ?u32 = null, // 150ms for lease-based reads
-// };
-
-// pub const ReadConsistency = enum {
-//     eventual, // Fast reads, may not be linearizable
-//     linearizable, // Slower, but guaranteed linearizable
-//     lease_based, // Fast + linearizable with leader lease
-// };
 
 pub const RaftState = enum {
     Follower,
@@ -117,13 +98,50 @@ pub const Snapshot = struct {
 };
 
 const SnapshotBackend = enum {
-    InMemory,
-    File,
+    in_memory,
+    file,
+    // TODO: in the future
     // Sqlite, etc.
 };
 
-pub const Transport = union(enum) {
-    InMemory,
-    Tcp,
-    // Grpc.
+const Transport = union(enum) {
+    json_rpc_http: struct {
+        use_connection_pooling: bool = true,
+        timeout_ms: u32 = 5000,
+        max_connections_per_peer: u8 = 5,
+    },
+    grpc: struct {
+        use_connection_pooling: bool = true,
+        timeout_ms: u32 = 5000,
+        keepalive_ms: u32 = 30000,
+    },
+    msgpack_tcp: struct {
+        use_connection_pooling: bool = true,
+        message_framing: MessageFraming = .length_prefixed,
+        timeout_ms: u32 = 5000,
+    },
+    protobuf_tcp: struct {
+        use_connection_pooling: bool = true,
+        message_framing: MessageFraming = .length_prefixed,
+        timeout_ms: u32 = 5000,
+    },
+    raw_tcp: struct {
+        use_connection_pooling: bool = false, // Raw might prefer simple connections
+        message_framing: MessageFraming = .length_prefixed,
+        timeout_ms: u32 = 5000,
+    },
+    in_memory: struct {
+        simulate_network_delay_ms: ?u32 = null, // For realistic testing
+    },
+
+    // TODO: in the future
+    // msgpack_udp,
+    // protobuf_udp,
+};
+
+const MessageFraming = enum {
+    length_prefixed, // 4 bytes length + payload
+    newline_delimited, // For text protocols
+    fixed_size, // Fixed message size
+    delimiter_based, // Custom delimiter (flexible)
 };

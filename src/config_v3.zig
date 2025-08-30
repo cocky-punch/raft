@@ -1,17 +1,25 @@
 const std = @import("std");
 const yaml = @import("yaml");
+const types = @import("types.zig");
 const Allocator = std.mem.Allocator;
 const Yaml = yaml.Yaml;
 
+//TODO
 pub const TransportType = enum {
     tcp,
     udp,
 };
 
-pub const MessageFraming = enum {
-    length_prefixed,
-    delimiter_based,
+pub const TcpConfig = struct {
+    use_connection_pooling: bool = true,
+    message_framing: types.MessageFraming = .length_prefixed,
 };
+
+pub const TransportConfig = struct {
+    type: TransportType = .tcp,
+    tcp: TcpConfig = .{},
+};
+//
 
 pub const ReadConsistency = enum {
     linearizable, // Slower, but guaranteed linearizable
@@ -38,16 +46,6 @@ pub const ProtocolConfig = struct {
     max_entries_per_append: u32 = 100,
     storage_type: StorageType = .persistent,
     leader_lease_timeout_ms: u32 = 150,
-};
-
-pub const TcpConfig = struct {
-    use_connection_pooling: bool = true,
-    message_framing: MessageFraming = .length_prefixed,
-};
-
-pub const TransportConfig = struct {
-    type: TransportType = .tcp,
-    tcp: TcpConfig = .{},
 };
 
 pub const ClientConfig = struct {
@@ -297,7 +295,7 @@ fn parseTransportType(type_str: []const u8) !TransportType {
     return error.InvalidTransportType;
 }
 
-fn parseMessageFraming(framing_str: []const u8) !MessageFraming {
+fn parseMessageFraming(framing_str: []const u8) !types.MessageFraming {
     if (std.mem.eql(u8, framing_str, "length_prefixed")) return .length_prefixed;
     if (std.mem.eql(u8, framing_str, "delimiter_based")) return .delimiter_based;
     return error.InvalidMessageFraming;

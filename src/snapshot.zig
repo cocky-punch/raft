@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("types.zig"); // Assuming Snapshot, etc. live there
+const types = @import("types.zig");
 
 pub const SnapshotStorage = struct {
     dir: std.fs.Dir,
