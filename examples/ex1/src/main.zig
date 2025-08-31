@@ -49,7 +49,8 @@ pub fn main() !void {
     const ClusterT = raft.Cluster(MyStateMachine);
 
     var cluster = ClusterT.init(allocator);
-    var node = try Node.init(allocator, config.self_id, sm);
+    // var node = try Node.init(allocator, config.self_id, sm);
+    var node = try Node.init(allocator, .{.path = "TODO" }, sm);
     for (config.peers) |x| {
         try cluster.addNodeAddress2(x.id, x.ip, x.port);
     }

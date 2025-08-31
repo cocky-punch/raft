@@ -48,27 +48,75 @@ pub fn RaftNode(comptime T: type) type {
         const Self = @This();
 
         //TODO: pass Config
-        pub fn init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
-            const nodes = std.ArrayList(cfg.Peer).init(allocator);
-            // Memory log
-            var log_memory_opts = std.StringHashMap([]const u8).init(allocator);
-            defer log_memory_opts.deinit();
-            try log_memory_opts.put("storage_type", "memory");
-            const memory_log = try Log.init(allocator, log_memory_opts);
+        // pub fn _init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
+        //     const nodes = std.ArrayList(cfg.Peer).init(allocator);
+        //     // Memory log
+        //     var log_memory_opts = std.StringHashMap([]const u8).init(allocator);
+        //     defer log_memory_opts.deinit();
+        //     try log_memory_opts.put("storage_type", "memory");
+        //     const memory_log = try Log.init(allocator, log_memory_opts);
+
+        //     return Self{
+        //         .allocator = allocator,
+        //         .inbox = std.ArrayList(RpcMessage).init(allocator),
+        //         .next_index = &[_]usize{},
+        //         .match_index = &[_]usize{},
+        //         .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
+        //         .log = memory_log,
+        //         .nodes_buffer = nodes,
+        //         .state_machine = sm,
+        //         .config = cfg.Config{
+        //             .self_id = id,
+        //             .peers = nodes.items,
+        //         },
+        //     };
+        // }
+
+        pub fn init(allocator: std.mem.Allocator, config_or_path: union(enum) {
+            config: cfg.Config,
+            path: []const u8,
+        }, sm: StateMachine(T)) !Self {
+            const config = switch (config_or_path) {
+                .config => |c| c,
+                .path => |p| try cfg.Config.loadFromFile(allocator, p),
+            };
+
+            // Initialize arrays based on peer count
+            const peer_count = config.peers.len;
+            const next_index = try allocator.alloc(usize, peer_count);
+            const match_index = try allocator.alloc(usize, peer_count);
+
+            // Initialize with default values
+            for (next_index, 0..) |*idx, i| {
+                _ = i;
+                idx.* = 1; // Raft log indices start at 1
+            }
+            for (match_index) |*idx| {
+                idx.* = 0;
+            }
+
+            // Build node_id_to_index mapping
+            var node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator);
+            for (config.peers, 0..) |peer, i| {
+                try node_id_to_index.put(peer.id, i);
+            }
+
+            // Initialize log based on config
+            var log_opts = std.StringHashMap([]const u8).init(allocator);
+            defer log_opts.deinit();
+            try log_opts.put("storage_type", @tagName(config.protocol.storage_type));
+            const log = try Log.init(allocator, log_opts);
 
             return Self{
+                .config = config,
                 .allocator = allocator,
+                .log = log,
                 .inbox = std.ArrayList(RpcMessage).init(allocator),
-                .next_index = &[_]usize{},
-                .match_index = &[_]usize{},
-                .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
-                .log = memory_log,
-                .nodes_buffer = nodes,
+                .nodes_buffer = std.ArrayList(cfg.Peer).init(allocator),
+                .next_index = next_index,
+                .match_index = match_index,
+                .node_id_to_index = node_id_to_index,
                 .state_machine = sm,
-                .config = cfg.Config{
-                    .self_id = id,
-                    .peers = nodes.items,
-                },
             };
         }
 
