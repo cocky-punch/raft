@@ -269,10 +269,15 @@ pub const Config = struct {
         std.debug.print("    storage_type: {s}\n", .{@tagName(self.protocol.storage_type)});
         std.debug.print("    leader_lease_timeout_ms: {d}\n", .{self.protocol.leader_lease_timeout_ms});
 
-        std.debug.print("  transport:\n");
-        std.debug.print("    type: {s}\n", .{@tagName(self.transport.type)});
-        std.debug.print("    tcp.use_connection_pooling: {}\n", .{self.transport.tcp.use_connection_pooling});
-        std.debug.print("    tcp.message_framing: {s}\n", .{@tagName(self.transport.tcp.message_framing)});
+        std.debug.print("  transport: {s}\n", .{@tagName(self.transport)});
+        switch (self.transport) {
+            .json_rpc_http => |cfg| std.debug.print("    timeout_ms: {d}\n", .{cfg.timeout_ms}),
+            .msgpack_tcp => |cfg| std.debug.print("    message_framing: {s}\n", .{@tagName(cfg.message_framing)}),
+            .in_memory => |cfg| std.debug.print("    simulate_network_delay_ms: {s}\n", .{@tagName(cfg.simulate_network_delay_ms)}),
+
+            // ... other variants as needed
+            else => {},
+        }
 
         std.debug.print("  client:\n");
         std.debug.print("    read_consistency: {s}\n", .{@tagName(self.client.read_consistency)});
