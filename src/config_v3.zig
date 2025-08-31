@@ -1,25 +1,11 @@
 const std = @import("std");
 const yaml = @import("yaml");
 const types = @import("types.zig");
+
+const Transport = types.Transport;
+const MessageFraming = types.MessageFraming;
 const Allocator = std.mem.Allocator;
 const Yaml = yaml.Yaml;
-
-//TODO
-pub const TransportType = enum {
-    tcp,
-    udp,
-};
-
-pub const TcpConfig = struct {
-    use_connection_pooling: bool = true,
-    message_framing: types.MessageFraming = .length_prefixed,
-};
-
-pub const TransportConfig = struct {
-    type: TransportType = .tcp,
-    tcp: TcpConfig = .{},
-};
-//
 
 pub const ReadConsistency = enum {
     linearizable, // Slower, but guaranteed linearizable
@@ -62,7 +48,7 @@ pub const Config = struct {
     self_id: u64,
     peers: []Peer,
     protocol: ProtocolConfig = .{},
-    transport: TransportConfig = .{},
+    transport: Transport = .{ .json_rpc_http = .{} }, // default
     client: ClientConfig = .{},
     performance: PerformanceConfig = .{},
 
@@ -112,10 +98,27 @@ pub const Config = struct {
             } = null,
             transport: ?struct {
                 type: ?[]const u8 = null,
-                tcp: ?struct {
+                json_rpc_http: ?struct {
+                    timeout_ms: ?u32 = null,
+                    use_connection_pooling: ?bool = null,
+                    max_connections_per_peer: ?u8 = null,
+                } = null,
+                msgpack_tcp: ?struct {
+                    timeout_ms: ?u32 = null,
                     use_connection_pooling: ?bool = null,
                     message_framing: ?[]const u8 = null,
+                    delimiter: ?[]const u8 = null,
                 } = null,
+                grpc: ?struct {
+                    timeout_ms: ?u32 = null,
+                    use_connection_pooling: ?bool = null,
+                    keepalive_ms: ?u32 = null,
+                } = null,
+                in_memory: ?struct {
+                    simulate_network_delay_ms: ?u32 = null,
+                } = null,
+                // Add other transports as needed...
+
             } = null,
             client: ?struct {
                 read_consistency: ?[]const u8 = null,
@@ -157,15 +160,37 @@ pub const Config = struct {
         }
 
         // Parse optional transport config
-        if (parsed.transport) |transport| {
-            if (transport.type) |type_str| {
-                config.transport.type = parseTransportType(type_str) catch .tcp;
-            }
-            if (transport.tcp) |tcp| {
-                if (tcp.use_connection_pooling) |val| config.transport.tcp.use_connection_pooling = val;
-                if (tcp.message_framing) |framing_str| {
-                    config.transport.tcp.message_framing = parseMessageFraming(framing_str) catch .length_prefixed;
+        if (parsed.transport) |transport_data| {
+            if (transport_data.type) |type_str| {
+                if (std.mem.eql(u8, type_str, "json_rpc_http")) {
+                    var cfg = Transport{ .json_rpc_http = .{} }; // the full union with defaults
+
+                    if (transport_data.json_rpc_http) |settings| {
+                        if (settings.timeout_ms) |val| cfg.json_rpc_http.timeout_ms = val;
+                        if (settings.use_connection_pooling) |val| cfg.json_rpc_http.use_connection_pooling = val;
+                        if (settings.max_connections_per_peer) |val| cfg.json_rpc_http.max_connections_per_peer = val;
+                    }
+                    config.transport = cfg;
+                } else if (std.mem.eql(u8, type_str, "msgpack_tcp")) {
+                    var cfg = Transport{ .msgpack_tcp = .{} };
+
+                    if (transport_data.msgpack_tcp) |settings| {
+                        if (settings.timeout_ms) |val| cfg.msgpack_tcp.timeout_ms = val;
+                        if (settings.use_connection_pooling) |val| cfg.msgpack_tcp.use_connection_pooling = val;
+                        if (settings.message_framing) |framing_str| {
+                            cfg.msgpack_tcp.message_framing = parseMessageFraming(framing_str) catch .length_prefixed;
+                        }
+                        if (settings.delimiter) |val| cfg.msgpack_tcp.delimiter = try allocator.dupe(u8, val);
+                    }
+                    config.transport = cfg;
+                } else if (std.mem.eql(u8, type_str, "in_memory")) {
+                    var cfg = types.Transport{ .in_memory = .{} };
+                    if (transport_data.in_memory) |settings| {
+                        if (settings.simulate_network_delay_ms) |val| cfg.in_memory.simulate_network_delay_ms = val;
+                    }
+                    config.transport = cfg;
                 }
+                // other transports as needed...
             }
         }
 
@@ -288,16 +313,22 @@ pub const Config = struct {
     }
 };
 
-// Helper parsing functions
-fn parseTransportType(type_str: []const u8) !TransportType {
-    if (std.mem.eql(u8, type_str, "tcp")) return .tcp;
-    if (std.mem.eql(u8, type_str, "udp")) return .udp;
+fn parseTransportType(type_str: []const u8) !Transport {
+    if (std.mem.eql(u8, type_str, "json_rpc_http")) return .{ .json_rpc_http = .{} };
+    if (std.mem.eql(u8, type_str, "grpc")) return .{ .grpc = .{} };
+    if (std.mem.eql(u8, type_str, "msgpack_tcp")) return .{ .msgpack_tcp = .{} };
+    if (std.mem.eql(u8, type_str, "protobuf_tcp")) return .{ .protobuf_tcp = .{} };
+    if (std.mem.eql(u8, type_str, "raw_tcp")) return .{ .raw_tcp = .{} };
+    if (std.mem.eql(u8, type_str, "in_memory")) return .{ .in_memory = .{} };
     return error.InvalidTransportType;
 }
 
 fn parseMessageFraming(framing_str: []const u8) !types.MessageFraming {
     if (std.mem.eql(u8, framing_str, "length_prefixed")) return .length_prefixed;
+    if (std.mem.eql(u8, framing_str, "newline_delimited")) return .newline_delimited;
     if (std.mem.eql(u8, framing_str, "delimiter_based")) return .delimiter_based;
+    if (std.mem.eql(u8, framing_str, "fixed_size")) return .fixed_size;
+
     return error.InvalidMessageFraming;
 }
 
@@ -336,10 +367,11 @@ test "config parsing with kubkon/zig-yaml" {
         \\  leader_lease_timeout_ms: 150
         \\
         \\transport:
-        \\  type: "tcp"
-        \\  tcp:
+        \\  type: "msgpack_tcp"
+        \\  msgpack_tcp:
         \\    use_connection_pooling: true
         \\    message_framing: "length_prefixed"
+        \\    timeout_ms: 3000
         \\
         \\client:
         \\  read_consistency: "linearizable"

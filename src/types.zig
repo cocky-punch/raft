@@ -104,7 +104,7 @@ const SnapshotBackend = enum {
     // Sqlite, etc.
 };
 
-const Transport = union(enum) {
+pub const Transport = union(enum) {
     json_rpc_http: struct {
         use_connection_pooling: bool = true,
         timeout_ms: u32 = 5000,
@@ -119,6 +119,7 @@ const Transport = union(enum) {
         use_connection_pooling: bool = true,
         message_framing: MessageFraming = .length_prefixed,
         timeout_ms: u32 = 5000,
+        delimiter: ?[]const u8 = null,
     },
     protobuf_tcp: struct {
         use_connection_pooling: bool = true,
@@ -139,7 +140,7 @@ const Transport = union(enum) {
     // protobuf_udp,
 };
 
-const MessageFraming = enum {
+pub const MessageFraming = enum {
     length_prefixed, // 4 bytes length + payload
     newline_delimited, // For text protocols
     fixed_size, // Fixed message size
