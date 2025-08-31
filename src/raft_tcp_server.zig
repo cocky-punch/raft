@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const RaftNode = @import("raft.zig").RaftNode;
-const Cluster = @import("raft.zig").Cluster;
+const RaftNode = @import("core.zig").RaftNode;
+const Cluster = @import("core.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
 
 pub fn RaftTcpServer(comptime T: type) type {

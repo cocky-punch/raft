@@ -125,11 +125,13 @@ pub const Transport = union(enum) {
         use_connection_pooling: bool = true,
         message_framing: MessageFraming = .length_prefixed,
         timeout_ms: u32 = 5000,
+        delimiter: ?[]const u8 = null,
     },
     raw_tcp: struct {
         use_connection_pooling: bool = false, // Raw might prefer simple connections
         message_framing: MessageFraming = .length_prefixed,
         timeout_ms: u32 = 5000,
+        delimiter: ?[]const u8 = null,
     },
     in_memory: struct {
         simulate_network_delay_ms: ?u32 = null, // For realistic testing

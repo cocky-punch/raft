@@ -47,6 +47,7 @@ pub fn RaftNode(comptime T: type) type {
 
         const Self = @This();
 
+        //TODO: pass Config
         pub fn init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
             const nodes = std.ArrayList(cfg.Peer).init(allocator);
             // Memory log

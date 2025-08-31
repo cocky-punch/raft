@@ -1,5 +1,5 @@
-pub const RaftNode = @import("raft.zig").RaftNode;
-pub const Cluster = @import("raft.zig").Cluster;
+pub const RaftNode = @import("core.zig").RaftNode;
+pub const Cluster = @import("core.zig").Cluster;
 
 //TODO
 pub const Command = @import("command_v3.zig").Command;

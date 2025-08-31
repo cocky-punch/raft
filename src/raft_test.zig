@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 
-const RaftNode = @import("raft.zig").RaftNode;
-const Cluster = @import("raft.zig").Cluster;
+const RaftNode = @import("core.zig").RaftNode;
+const Cluster = @import("core.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
 
 // const Command = @import("command.zig").Command;
