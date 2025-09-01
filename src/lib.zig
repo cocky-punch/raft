@@ -1,14 +1,16 @@
 pub const RaftNode = @import("core.zig").RaftNode;
 pub const Cluster = @import("core.zig").Cluster;
-
-//TODO
 pub const Command = @import("command_v3.zig").Command;
 pub const RpcMessage = @import("types.zig").RpcMessage;
-
-//TODO
 pub const Config = @import("config_v3.zig").Config;
-
 pub const StateMachine = @import("state_machine.zig").StateMachine;
 pub const LogEntry = @import("log.zig").LogEntry;
 pub const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
 pub const sendFramedRpc = @import("raft_tcp_server.zig").sendFramedRpc;
+
+
+//import the modules in order to run the tests
+comptime {
+    _ = @import("core.zig");
+    _ = @import("config_v3.zig");
+}

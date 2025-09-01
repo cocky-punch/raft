@@ -1,0 +1,31 @@
+self_id: 1
+
+peers:
+  - id: 1
+    ip: "127.0.0.1"
+    port: 9001
+  - id: 2
+    ip: "127.0.0.1"
+    port: 9002
+
+protocol:
+  election_timeout_min_ms: 150
+  heartbeat_interval_ms: 50
+  max_entries_per_append: 100
+  storage_type: "persistent"
+  leader_lease_timeout_ms: 150
+
+transport:
+  type: "msgpack_tcp"
+  msgpack_tcp:
+    use_connection_pooling: true
+    message_framing: "length_prefixed"
+    timeout_ms: 3000
+
+client:
+  read_consistency: "linearizable"
+  client_timeout_ms: 5000
+
+performance:
+  batch_append_entries: true
+  pre_vote_enabled: true
