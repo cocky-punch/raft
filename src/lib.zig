@@ -11,6 +11,9 @@ pub const sendFramedRpc = @import("raft_tcp_server.zig").sendFramedRpc;
 
 //import the modules in order to run the tests
 comptime {
-    _ = @import("core.zig");
-    _ = @import("config_v3.zig");
+    if (@import("builtin").is_test) {
+        _ = @import("core.zig");
+        _ = @import("config_v3.zig");
+        _ = @import("raft_test.zig");
+    }
 }

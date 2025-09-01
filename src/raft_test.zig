@@ -29,7 +29,8 @@ test "Follower becomes Candidate on election timeout" {
     var cluster = Cluster(DummyStateMachine).init(allocator);
     defer cluster.deinit();
 
-    var node = try RaftNode(DummyStateMachine).init(allocator, 1, sm);
+    //FIXME
+    var node = try RaftNode(DummyStateMachine).init(allocator, sm);
     defer node.deinit();
 
     node.resetElectionTimeout();
