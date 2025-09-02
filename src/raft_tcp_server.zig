@@ -51,8 +51,17 @@ pub fn RaftTcpServer(comptime T: type) type {
                     continue;
                 }
 
+                // Create a copy of the stream for the thread
+                const stream_copy = connection.stream;
+
                 std.debug.print("New connection from {}\n", .{connection.address});
-                _ = try std.Thread.spawn(.{}, handleIncomingConnectionThread, .{ self, connection.stream });
+                // _ = try std.Thread.spawn(.{}, handleIncomingConnectionThread, .{ self, connection.stream });
+                _ = std.Thread.spawn(.{}, handleIncomingConnectionThread, .{ self, stream_copy }) catch |err| {
+                    std.log.err("Failed to spawn thread: {}", .{err});
+                    _ = self.active_clients.fetchSub(1, .seq_cst);
+                    connection.stream.close();
+                    continue;
+                };
             }
         }
 
@@ -66,7 +75,7 @@ pub fn RaftTcpServer(comptime T: type) type {
         }
 
         pub fn handleIncomingConnection(self: *Self, stream: std.net.Stream) !void {
-            var reader = stream.reader();
+            const reader = stream.reader();
 
             // read 4-byte length prefix
             var len_buf: [4]u8 = undefined;
@@ -74,29 +83,28 @@ pub fn RaftTcpServer(comptime T: type) type {
             const msg_len = std.mem.readInt(u32, &len_buf, .big);
 
             // read that many bytes
-            var buffer = try self.allocator.alloc(u8, msg_len);
+            const buffer = try self.allocator.alloc(u8, msg_len);
             defer self.allocator.free(buffer);
 
             if (builtin.mode == .Debug) {
                 std.log.debug("[DEBUG] #1", .{});
             }
+
             // the counter has advanced its position, hence from 0 again
             try reader.readNoEof(buffer[0..msg_len]);
             std.log.debug("[DEBUG] #2 buffer: {s}", .{buffer[0..msg_len]});
 
             const msg = try RpcMessage.deserialize(buffer);
-
             if (builtin.mode == .Debug) {
                 std.log.debug("[DEBUG] #3", .{});
             }
+
             switch (msg) {
                 .ClientCommand => |cmd| {
                     if (self.local_node.state == .Leader) {
-
                         //TODO
-                        //
-                        const cmd_id = self.next_command_id.fetchAdd(1, .seq_cst);
-                        // const cmd_id = std.crypto.random.int(u64);
+                        // const cmd_id = self.next_command_id.fetchAdd(1, .seq_cst);
+                        const cmd_id = std.crypto.random.int(u64);
 
                         // const cmd2 = CommandWithId{
                         //     .id = cmd_id,
@@ -104,15 +112,8 @@ pub fn RaftTcpServer(comptime T: type) type {
                         // };
 
                         try self.pending_acks.put(cmd_id, stream);
-
-                        //TODO
-                        // try self.local_node.handleClientCommand(cmd);
-                        // try self.local_node.handleClientCommand(cmd2);
                         _ = try self.local_node.handleClientCommandStructured(cmd);
-
-                        // const ack = RpcMessage{ .Ack = .{} };
                         const ack = RpcMessage{ .Ack = .{ .command_id = cmd_id } };
-
                         try sendFramedRpc(self.allocator, stream.writer(), ack);
                     } else {
                         const leader_id = self.local_node.leader_id orelse return error.UnknownLeader;

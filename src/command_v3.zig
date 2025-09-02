@@ -2,7 +2,6 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
-// Command abstraction - extensible design
 pub const Command = union(enum) {
     set: struct {
         key: []const u8,

@@ -8,7 +8,6 @@ pub const LogEntry = @import("log.zig").LogEntry;
 pub const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
 pub const sendFramedRpc = @import("raft_tcp_server.zig").sendFramedRpc;
 
-
 //import the modules in order to run the tests
 comptime {
     if (@import("builtin").is_test) {

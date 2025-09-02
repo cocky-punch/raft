@@ -81,7 +81,6 @@ pub const Config = struct {
             else => return err,
         };
 
-        // Use typed parsing to directly parse into our Config struct
         const ParsedConfig = struct {
             self_id: u64,
             peers: []const struct {

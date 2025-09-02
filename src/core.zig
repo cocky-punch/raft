@@ -47,31 +47,6 @@ pub fn RaftNode(comptime T: type) type {
 
         const Self = @This();
 
-        //TODO: pass Config
-        // pub fn _init(allocator: std.mem.Allocator, id: NodeId, sm: StateMachine(T)) !Self {
-        //     const nodes = std.ArrayList(cfg.Peer).init(allocator);
-        //     // Memory log
-        //     var log_memory_opts = std.StringHashMap([]const u8).init(allocator);
-        //     defer log_memory_opts.deinit();
-        //     try log_memory_opts.put("storage_type", "memory");
-        //     const memory_log = try Log.init(allocator, log_memory_opts);
-
-        //     return Self{
-        //         .allocator = allocator,
-        //         .inbox = std.ArrayList(RpcMessage).init(allocator),
-        //         .next_index = &[_]usize{},
-        //         .match_index = &[_]usize{},
-        //         .node_id_to_index = std.AutoHashMap(NodeId, usize).init(allocator),
-        //         .log = memory_log,
-        //         .nodes_buffer = nodes,
-        //         .state_machine = sm,
-        //         .config = cfg.Config{
-        //             .self_id = id,
-        //             .peers = nodes.items,
-        //         },
-        //     };
-        // }
-
         pub fn init(allocator: std.mem.Allocator, config_or_path: union(enum) {
             config: cfg.Config,
             path: []const u8,
@@ -195,7 +170,8 @@ pub fn RaftNode(comptime T: type) type {
                 },
                 .Leader => {
                     // Send heartbeat regularly (could add timer for heartbeat interval)
-                    sendHeartbeats(self, cluster);
+                    // sendHeartbeats(self, cluster);
+                    sendHeartbeats(self);
                 },
             }
 
@@ -528,7 +504,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        fn sendHeartbeats(self: *RaftNode(T), cluster: *Cluster(T)) void {
+        fn sendHeartbeatsOld(self: *RaftNode(T), cluster: *Cluster(T)) void {
             for (self.config.peers, 0..) |node, i| {
                 if (node.id == self.config.self_id) continue;
 
@@ -573,47 +549,242 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         fn sendHeartbeat(self: *Self, peer: cfg.Peer) !void {
-            // A heartbeat is an AppendEntries RPC with no entries
-            // This is specifically for leadership confirmation, not log replication
+            const peer_index = self.getPeerIndex(peer.id) orelse return error.PeerNotFound;
 
-            const peer_index = self.getPeerIndex(peer.id) orelse 0;
+            const next_idx = self.next_index[peer_index];
+            const prev_log_index = if (next_idx > 0) next_idx - 1 else 0;
+            const prev_log_term = self.log.getTermAtIndex(prev_log_index) orelse 0;
+            const last_index = self.log.getLastIndex();
 
-            const prev_log_index =
-                if (self.next_index[peer_index] > 0) self.next_index[peer_index] - 1 else 0;
+            // Collect entries to send
+            var entries_to_send = std.ArrayList(LogEntry).init(self.allocator);
+            defer entries_to_send.deinit();
 
-            const prev_log_term =
-                if (prev_log_index > 0) (self.log.getTermAtIndex(prev_log_index) orelse 0) else 0;
+            var current_index = next_idx;
+            while (current_index <= last_index) {
+                if (self.log.getEntry(current_index)) |entry| {
+                    try entries_to_send.append(entry.*);
+                }
+                current_index += 1;
+            }
 
-            // const heartbeat = AppendEntriesRequest{
-            const heartbeat = t.AppendEntries{
+            const req = t.AppendEntries{
                 .term = self.current_term,
                 .leader_id = self.config.self_id,
                 .prev_log_index = prev_log_index,
                 .prev_log_term = prev_log_term,
-                .entries = &[_]LogEntry{}, // Empty for heartbeat
+                .entries = entries_to_send.items,
                 .leader_commit = self.commit_index,
             };
 
-            //TODO
-            _ = heartbeat;
+            const response = switch (self.config.transport) {
+                .json_rpc_http => try self.sendJsonRpc(peer, req),
+                .grpc => {
+                    // try self.sendGrpc(peer, req)
+                    @panic("not implemented");
+                },
+                .msgpack_tcp => {
+                    // try self.sendMsgPackTcp(peer, req)
+                    @panic("not implemented");
+                },
+                .protobuf_tcp => {
+                    // try self.sendProtobufTcp(peer, req)
+                    @panic("not implemented");
+                },
+                .raw_tcp => {
+                    // try self.sendRawTcp(peer, req)
+                    @panic("not implemented");
+                },
+                .in_memory => {
+                    // try self.sendInMemory(peer, req)
+                    @panic("not implemented");
+                },
+            };
 
-            //TODO
-            // Send via RPC
-            // const response =
-            //     try self.rpc_client.sendAppendEntriesWithTimeout(peer, heartbeat, self.config.heartbeat_timeout_ms);
+            // Handle Raft protocol response logic
+            if (response.term > self.current_term) {
+                self.current_term = response.term;
+                self.state = .Follower;
+                return error.LeadershipLost;
+            }
 
-            // // Update term if we receive a higher term
+            if (!response.success) {
+                // Log inconsistency - decrement next_index and retry later
+                if (self.next_index[peer_index] > 0) {
+                    self.next_index[peer_index] -= 1;
+                }
+                return error.LogInconsistency;
+            } else {
+                // Success - update next_index and match_index
+                self.next_index[peer_index] = prev_log_index + entries_to_send.items.len + 1;
+                self.match_index[peer_index] = prev_log_index + entries_to_send.items.len;
+            }
+        }
+
+        fn sendHeartbeats(self: *Self) void {
+            for (self.config.peers) |peer| {
+                if (peer.id == self.config.self_id) continue;
+                self.sendHeartbeat(peer) catch |err| {
+                    std.log.err("Failed to send heartbeat to node {}: {}\n", .{ peer.id, err });
+                };
+            }
+        }
+
+        fn sendInMemory(self: *Self, peer: cfg.Peer, req: t.AppendEntries) !void {
+            // const target_node = self.transport.in_memory.cluster.getNode(peer.id) orelse return error.PeerNotFound;
+            // const response = target_node.handleAppendEntries(req);
+
+            // // Handle response same as network transports
             // if (response.term > self.current_term) {
-            //     try self.log.updateTerm(response.term);
             //     self.current_term = response.term;
             //     self.state = .Follower;
             //     return error.LeadershipLost;
             // }
+            // // ... rest of response handling
 
-            // // For heartbeats, we mainly care about success/failure for leadership confirmation
-            // if (!response.success) {
-            //     std.log.warn("Heartbeat to peer {} failed", .{peer.id});
-            // }
+            _ = self;
+            _ = peer;
+            _ = req;
+
+            @panic("not implemented");
+        }
+
+        fn sendJsonRpc(self: *Self, peer: cfg.Peer, req: t.AppendEntries) !t.AppendEntriesResponse {
+            // Build JSON-RPC request envelope
+            const rpc_request = struct {
+                jsonrpc: []const u8 = "2.0",
+                method: []const u8 = "appendEntries",
+                params: t.AppendEntries,
+                id: u32,
+            }{
+                .params = req,
+                .id = @intCast(std.time.timestamp() & 0xFFFFFFFF), // Simple ID generation
+            };
+
+            const json_payload = try std.json.stringifyAlloc(self.allocator, rpc_request, .{});
+            defer self.allocator.free(json_payload);
+
+            var client = std.http.Client{ .allocator = self.allocator };
+            defer client.deinit();
+
+            const url = try std.fmt.allocPrint(self.allocator, "http://{any}:{any}/rpc", .{ peer.ip, peer.port });
+            defer self.allocator.free(url);
+
+            // Parse URI
+            const uri = try std.Uri.parse(url);
+
+            const transport_config = switch (self.config.transport) {
+                .json_rpc_http => |c| c,
+                else => return error.InvalidTransport,
+            };
+
+            // Set up request
+            var server_header_buffer: [2048]u8 = undefined;
+            var request = try client.open(.POST, uri, .{ .server_header_buffer = &server_header_buffer, .headers = .{
+                .content_type = .{ .override = "application/json" },
+                .user_agent = .{ .override = "raft-node/1.0" },
+            }, .keep_alive = transport_config.use_connection_pooling });
+            defer request.deinit();
+
+            // Send request
+            request.transfer_encoding = .{ .content_length = json_payload.len };
+            try request.send();
+            try request.writeAll(json_payload);
+            try request.finish();
+
+            // Wait for response with timeout
+            try request.wait();
+
+            // Check HTTP status
+            if (request.response.status != .ok) {
+                std.log.warn("HTTP error {} from peer {}\n", .{ @intFromEnum(request.response.status), peer.id });
+                return error.HttpError;
+            }
+
+            // Read response body
+            const body_max_size = 65536;
+            var bbuffer: [body_max_size]u8 = undefined;
+            const response_body = try request.readAll(&bbuffer); // 1MB max
+            const actual_body = bbuffer[0..response_body]; // Get the actual slice
+            defer self.allocator.free(actual_body);
+
+            // Detect transport mismatch
+            if (!isJsonData(actual_body)) {
+                self.detectTransportMismatch(peer.ip, actual_body);
+                return error.TransportMismatch;
+            }
+
+            // Parse JSON-RPC response
+            const JsonRpcResponse = struct {
+                jsonrpc: []const u8,
+                result: ?t.AppendEntriesResponse = null,
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                } = null,
+                id: u32,
+            };
+
+            const rpc_response = std.json.parseFromSlice(JsonRpcResponse, self.allocator, actual_body, .{}) catch |err| {
+                std.log.warn("Failed to parse JSON-RPC response from peer {}: {}\n", .{ peer.id, err });
+                return error.InvalidJsonRpcResponse;
+            };
+            defer rpc_response.deinit();
+
+            // Check for JSON-RPC errors
+            if (rpc_response.value.@"error") |rpc_error| {
+                std.log.warn("JSON-RPC error from peer {}: {} - {s}\n", .{ peer.id, rpc_error.code, rpc_error.message });
+                return error.RpcError;
+            }
+
+            // Validate response ID matches request ID
+            if (rpc_response.value.id != rpc_request.id) {
+                std.log.warn("JSON-RPC response ID mismatch from peer {}: expected {}, got {}\n", .{ peer.id, rpc_request.id, rpc_response.value.id });
+                return error.RpcIdMismatch;
+            }
+
+            // Return the Raft response
+            return rpc_response.value.result orelse return error.MissingRpcResult;
+        }
+
+        // Helper function for JSON detection
+        fn isJsonData(data: []const u8) bool {
+            const trimmed = std.mem.trim(u8, data, " \t\r\n");
+            return trimmed.len > 0 and (trimmed[0] == '{' or trimmed[0] == '[');
+        }
+
+        fn isProtobufData(data: []const u8) bool {
+            _ = data;
+
+            @panic("not implemented");
+        }
+
+        fn isMsgPackData(data: []const u8) bool {
+            _ = data;
+
+            @panic("not implemented");
+        }
+
+        fn isGrpcData(data: []const u8) bool {
+            _ = data;
+
+            @panic("not implemented");
+        }
+
+        fn isHttpRequest(data: []const u8) bool {
+            _ = data;
+
+            @panic("not implemented");
+        }
+
+        fn isBinaryData(data: []const u8) bool {
+            // Check for non-printable characters
+            for (data[0..@min(data.len, 100)]) |byte| {
+                if (byte < 32 and byte != '\n' and byte != '\r' and byte != '\t') {
+                    return true;
+                }
+            }
+            return false;
         }
 
         fn updateTermIfNeeded(self: *RaftNode(T), new_term: u64) void {
@@ -711,6 +882,62 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
+        fn detectTransportMismatch(self: *Self, peer_addr: []const u8, data: []const u8) void {
+            // const current_transport = @tagName(self.config.transport);
+
+            switch (self.config.transport) {
+                .json_rpc_http => {
+                    if (isBinaryData(data)) {
+                        //TODO: {any}
+                        if (isProtobufData(data)) {
+                            std.log.warn("Peer {any} sent Protobuf to JSON-RPC HTTP endpoint - peer likely using protobuf_tcp or grpc\n", .{peer_addr});
+                        } else if (isMsgPackData(data)) {
+                            std.log.warn("Peer {any} sent MessagePack to JSON-RPC HTTP endpoint - peer likely using msgpack_tcp\n", .{peer_addr});
+                        } else {
+                            std.log.warn("Peer {any} sent binary data to JSON-RPC HTTP endpoint - peer likely using raw_tcp\n", .{peer_addr});
+                        }
+                    }
+                },
+                .grpc => {
+                    if (!isGrpcData(data)) {
+                        if (isJsonData(data)) {
+                            std.log.warn("Peer {any} sent JSON to gRPC endpoint - peer likely using json_rpc_http\n", .{peer_addr});
+                        } else {
+                            std.log.warn("Peer {any} sent non-gRPC data to gRPC endpoint\n", .{peer_addr});
+                        }
+                    }
+                },
+                .msgpack_tcp => {
+                    if (!isMsgPackData(data)) {
+                        if (isJsonData(data)) {
+                            std.log.warn("Peer {any} sent JSON to MessagePack TCP endpoint - peer likely using json_rpc_http\n", .{peer_addr});
+                        } else if (isProtobufData(data)) {
+                            std.log.warn("Peer {any} sent Protobuf to MessagePack TCP endpoint - peer likely using protobuf_tcp\n", .{peer_addr});
+                        }
+                    }
+                },
+                .protobuf_tcp => {
+                    if (!isProtobufData(data)) {
+                        if (isJsonData(data)) {
+                            std.log.warn("Peer {any} sent JSON to Protobuf TCP endpoint - peer likely using json_rpc_http\n", .{peer_addr});
+                        } else if (isMsgPackData(data)) {
+                            std.log.warn("Peer {any} sent MessagePack to Protobuf TCP endpoint - peer likely using msgpack_tcp\n", .{peer_addr});
+                        }
+                    }
+                },
+                .raw_tcp => {
+                    // Raw TCP is flexible, but can still detect obvious mismatches
+                    if (isHttpRequest(data)) {
+                        std.log.warn("Peer {any} sent HTTP request to raw TCP endpoint - peer likely using json_rpc_http\n", .{peer_addr});
+                    }
+                },
+                .in_memory => {
+                    // Should never receive network data
+                    std.log.warn("Peer {any} sent network data to in_memory transport - configuration error\n", .{peer_addr});
+                },
+            }
+        }
+
         fn handleReadCommand(self: *Self, key: []const u8) !?[]const u8 {
             // Ensure we're still the leader before reading
             if (self.state != .Leader) {
@@ -763,18 +990,14 @@ pub fn RaftNode(comptime T: type) type {
         fn confirmLeadership(self: *Self) !bool {
             // Send heartbeat to majority of followers
             var success_count: usize = 1; // Count self
-            // const majority = (self.config.peers.len / 2) + 1;
             const majority = (self.config.peers.len / 2) + 1;
 
             // sync version for simplicity
             // TODO - make it async
             //
-            // for (self.config.peers) |peer| {
-            //
             for (self.config.peers) |peer| {
                 if (peer.id != self.config.self_id) {
                     if (self.sendHeartbeat(peer)) {
-                        // if (self.sendHeartbeats(peer)) {
                         success_count += 1;
                         if (success_count >= majority) {
                             return true;
@@ -825,7 +1048,8 @@ pub fn RaftNode(comptime T: type) type {
                 self.match_index[i] = 0;
             }
 
-            self.sendHeartbeats(cluster);
+            // self.sendHeartbeats(cluster);
+            self.sendHeartbeats();
         }
 
         //TODO
@@ -902,7 +1126,6 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         // Enhanced version based on your reference - handles both heartbeats and log replication
-        // fn sendAppendEntries(self: *Self, peer: t.Node) !void {
         fn sendAppendEntries(self: *Self, peer: cfg.Peer) !void {
             const peer_index = self.getPeerIndex(peer.id) orelse {
                 std.log.err("Peer {} not found in peers array", .{peer.id});

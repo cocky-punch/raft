@@ -4,11 +4,7 @@ const testing = std.testing;
 const RaftNode = @import("core.zig").RaftNode;
 const Cluster = @import("core.zig").Cluster;
 const RpcMessage = @import("types.zig").RpcMessage;
-
-// const Command = @import("command.zig").Command;
-// const Command = @import("command_v2.zig").Command;
 const Command = @import("command_v3.zig").Command;
-
 const StateMachine = @import("state_machine.zig").StateMachine;
 const LogEntry = @import("log.zig").LogEntry;
 
