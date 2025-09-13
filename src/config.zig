@@ -439,27 +439,3 @@ test "config parsing with minimal YAML" {
     // try std.testing.expect(config.transport.type == .tcp); // default
     try std.testing.expect(config.client.read_consistency == .linearizable); // default
 }
-
-// TODO remove
-pub fn example1() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var config = Config.loadFromFile(allocator, "config.yaml") catch |err| {
-        std.debug.print("Failed to load config: {}\n", .{err});
-        return;
-    };
-    defer config.deinit(allocator);
-
-    config.print();
-
-    if (config.getSelfPeer()) |self_peer| {
-        std.debug.print("Starting server on {}:{}\n", .{ self_peer.ip, self_peer.port });
-    }
-
-    const other_peers = try config.getOtherPeers(allocator);
-    defer allocator.free(other_peers);
-
-    std.debug.print("Will connect to {} other peers\n", .{other_peers.len});
-}

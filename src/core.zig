@@ -11,7 +11,7 @@ const LogEntry = @import("log.zig").LogEntry;
 const cmd_mod = @import("command_v3.zig");
 const Command = cmd_mod.Command;
 const ClientCommandResult = cmd_mod.ClientCommandResult;
-const cfg = @import("config_v3.zig");
+const cfg = @import("config.zig");
 const Config = cfg.Config;
 
 const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
@@ -504,50 +504,6 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        fn sendHeartbeatsOld(self: *RaftNode(T), cluster: *Cluster(T)) void {
-            for (self.config.peers, 0..) |node, i| {
-                if (node.id == self.config.self_id) continue;
-
-                const next_idx = self.next_index[i];
-                const prev_log_index = if (next_idx > 0) next_idx - 1 else 0;
-                const prev_log_term = self.log.getTermAtIndex(prev_log_index) orelse 0;
-
-                const last_index = self.log.getLastIndex();
-                const start_index = next_idx + 1; // Convert to 1-based Raft indexing
-
-                // Collect entries to send
-                var entries_to_send = std.ArrayList(LogEntry).init(self.allocator);
-                defer entries_to_send.deinit();
-                var current_index = start_index;
-                while (current_index <= last_index) {
-                    if (self.log.getEntry(current_index)) |x| {
-                        entries_to_send.append(x.*) catch {
-                            std.log.err("Failed to append element {} to entries_to_send\n", .{x.*});
-                        };
-                    }
-                    current_index += 1;
-                }
-
-                const to_send = entries_to_send.items;
-
-                const req = t.AppendEntries{
-                    .term = self.current_term,
-                    .leader_id = self.config.self_id,
-                    .prev_log_index = prev_log_index,
-                    .prev_log_term = prev_log_term,
-                    .entries = to_send, // heartbeat → no new entries
-                    .leader_commit = self.commit_index,
-                };
-
-                const msg = t.RpcMessage{ .AppendEntries = req };
-
-                // Send to the target node
-                _ = cluster.sendMessage(node.id, msg) catch {
-                    std.log.err("Failed to send AppendEntries to node {}\n", .{node.id});
-                };
-            }
-        }
-
         fn sendHeartbeat(self: *Self, peer: cfg.Peer) !void {
             const peer_index = self.getPeerIndex(peer.id) orelse return error.PeerNotFound;
 
@@ -630,7 +586,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        fn sendInMemory(self: *Self, peer: cfg.Peer, req: t.AppendEntries) !void {
+        fn sendInMemory(self: *Self, peer: cfg.Peer, req: t.AppendEntries) !t.AppendEntriesResponse {
             // const target_node = self.transport.in_memory.cluster.getNode(peer.id) orelse return error.PeerNotFound;
             // const response = target_node.handleAppendEntries(req);
 
