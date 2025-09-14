@@ -86,6 +86,11 @@ pub const RpcMessage = union(enum) {
     pub fn deserialize(bytes: []const u8) !RpcMessage {
         return try std.json.parseFromSliceLeaky(RpcMessage, std.heap.page_allocator, bytes, .{});
     }
+
+    //TODO
+    pub fn deserialize2(allocator: std.mem.Allocator, bytes: []const u8) !std.json.Parsed(RpcMessage) {
+        return try std.json.parseFromSlice(RpcMessage, allocator, bytes, .{});
+    }
 };
 
 pub const Snapshot = struct {

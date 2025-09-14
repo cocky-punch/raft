@@ -132,6 +132,9 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
+
+        //NOTE
+        //in-memory transport only
         pub fn tick(self: *RaftNode(T), cluster: *Cluster(T)) void {
             const now = std.time.milliTimestamp();
 
@@ -169,8 +172,7 @@ pub fn RaftNode(comptime T: type) type {
                     }
                 },
                 .Leader => {
-                    // Send heartbeat regularly (could add timer for heartbeat interval)
-                    // sendHeartbeats(self, cluster);
+                    // Send heartbeat regularly
                     sendHeartbeats(self);
                 },
             }
@@ -533,8 +535,31 @@ pub fn RaftNode(comptime T: type) type {
                 .leader_commit = self.commit_index,
             };
 
-            const response = switch (self.config.transport) {
-                .json_rpc_http => try self.sendJsonRpc(peer, req),
+            switch (self.config.transport) {
+                // .json_rpc_http => try self.sendJsonRpc(peer, req, false),
+                .json_rpc_http => {
+                    const response0 = try self.sendJsonRpc(peer, RpcMessage{ .AppendEntries = req }, false);
+                    const response = response0.AppendEntriesResponse;
+
+                    // Handle Raft protocol response logic
+                    if (response.term > self.current_term) {
+                        self.current_term = response.term;
+                        self.state = .Follower;
+                        return error.LeadershipLost;
+                    }
+
+                    if (!response.success) {
+                        // Log inconsistency - decrement next_index and retry later
+                        if (self.next_index[peer_index] > 0) {
+                            self.next_index[peer_index] -= 1;
+                        }
+                        return error.LogInconsistency;
+                    } else {
+                        // Success - update next_index and match_index
+                        self.next_index[peer_index] = prev_log_index + entries_to_send.items.len + 1;
+                        self.match_index[peer_index] = prev_log_index + entries_to_send.items.len;
+                    }
+                },
                 .grpc => {
                     // try self.sendGrpc(peer, req)
                     @panic("not implemented");
@@ -555,25 +580,6 @@ pub fn RaftNode(comptime T: type) type {
                     // try self.sendInMemory(peer, req)
                     @panic("not implemented");
                 },
-            };
-
-            // Handle Raft protocol response logic
-            if (response.term > self.current_term) {
-                self.current_term = response.term;
-                self.state = .Follower;
-                return error.LeadershipLost;
-            }
-
-            if (!response.success) {
-                // Log inconsistency - decrement next_index and retry later
-                if (self.next_index[peer_index] > 0) {
-                    self.next_index[peer_index] -= 1;
-                }
-                return error.LogInconsistency;
-            } else {
-                // Success - update next_index and match_index
-                self.next_index[peer_index] = prev_log_index + entries_to_send.items.len + 1;
-                self.match_index[peer_index] = prev_log_index + entries_to_send.items.len;
             }
         }
 
@@ -605,41 +611,64 @@ pub fn RaftNode(comptime T: type) type {
             @panic("not implemented");
         }
 
-        fn sendJsonRpc(self: *Self, peer: cfg.Peer, req: t.AppendEntries) !t.AppendEntriesResponse {
-            // Build JSON-RPC request envelope
+
+
+        //TODO Json RPC via TCP
+        fn sendJsonRpc(
+            self: *Self,
+            peer: cfg.Peer,
+            req: RpcMessage,
+            use_https: bool
+        ) !RpcMessage {
+            const method = switch (req) {
+                .RequestVote => "requestVote",
+                .AppendEntries => "appendEntries",
+                .InstallSnapshot => "installSnapshot",
+                .TimeoutNow => "timeoutNow",
+                .ClientCommand => "clientCommand",
+                else => return error.InvalidRequestType,
+            };
+
             const rpc_request = struct {
                 jsonrpc: []const u8 = "2.0",
-                method: []const u8 = "appendEntries",
-                params: t.AppendEntries,
+                method: []const u8,
+                params: RpcMessage,
                 id: u32,
             }{
+                .method = method,
                 .params = req,
-                .id = @intCast(std.time.timestamp() & 0xFFFFFFFF), // Simple ID generation
+                .id = @intCast(std.time.timestamp() & 0xFFFFFFFF),
             };
 
             const json_payload = try std.json.stringifyAlloc(self.allocator, rpc_request, .{});
             defer self.allocator.free(json_payload);
 
-            var client = std.http.Client{ .allocator = self.allocator };
+            var client = std.http.Client{
+                .allocator = self.allocator,
+                //FIXME
+                // .ca_bundle = if (use_https) .{ .rescan = true } else .none,
+            };
             defer client.deinit();
 
-            const url = try std.fmt.allocPrint(self.allocator, "http://{any}:{any}/rpc", .{ peer.ip, peer.port });
+            const protocol = if (use_https) "https" else "http";
+            const url = try std.fmt.allocPrint(self.allocator, "{s}://{any}:{any}/rpc", .{ protocol, peer.ip, peer.port });
             defer self.allocator.free(url);
-
-            // Parse URI
             const uri = try std.Uri.parse(url);
-
             const transport_config = switch (self.config.transport) {
                 .json_rpc_http => |c| c,
                 else => return error.InvalidTransport,
             };
 
-            // Set up request
+            // Set up request with proper headers
             var server_header_buffer: [2048]u8 = undefined;
-            var request = try client.open(.POST, uri, .{ .server_header_buffer = &server_header_buffer, .headers = .{
-                .content_type = .{ .override = "application/json" },
-                .user_agent = .{ .override = "raft-node/1.0" },
-            }, .keep_alive = transport_config.use_connection_pooling });
+            var request = try client.open(.POST, uri, .{
+                .server_header_buffer = &server_header_buffer,
+                .headers = .{
+                    .content_type = .{ .override = "application/json" },
+                    .user_agent = .{ .override = "raft-node/1.0" },
+                },
+                .keep_alive = transport_config.use_connection_pooling
+            });
             defer request.deinit();
 
             // Send request
@@ -648,7 +677,7 @@ pub fn RaftNode(comptime T: type) type {
             try request.writeAll(json_payload);
             try request.finish();
 
-            // Wait for response with timeout
+            // Wait for response
             try request.wait();
 
             // Check HTTP status
@@ -657,12 +686,13 @@ pub fn RaftNode(comptime T: type) type {
                 return error.HttpError;
             }
 
-            // Read response body
+            // Read response body with proper buffer management
             const body_max_size = 65536;
-            var bbuffer: [body_max_size]u8 = undefined;
-            const response_body = try request.readAll(&bbuffer); // 1MB max
-            const actual_body = bbuffer[0..response_body]; // Get the actual slice
-            defer self.allocator.free(actual_body);
+            const response_buffer = try self.allocator.alloc(u8, body_max_size);
+            defer self.allocator.free(response_buffer);
+
+            const response_len = try request.readAll(response_buffer);
+            const actual_body = response_buffer[0..response_len];
 
             // Detect transport mismatch
             if (!isJsonData(actual_body)) {
@@ -670,10 +700,10 @@ pub fn RaftNode(comptime T: type) type {
                 return error.TransportMismatch;
             }
 
-            // Parse JSON-RPC response
+            // Parse JSON-RPC response envelope first (result is still raw JSON)
             const JsonRpcResponse = struct {
                 jsonrpc: []const u8,
-                result: ?t.AppendEntriesResponse = null,
+                result: ?std.json.Value = null,
                 @"error": ?struct {
                     code: i32,
                     message: []const u8,
@@ -699,8 +729,45 @@ pub fn RaftNode(comptime T: type) type {
                 return error.RpcIdMismatch;
             }
 
-            // Return the Raft response
-            return rpc_response.value.result orelse return error.MissingRpcResult;
+            const result_value = rpc_response.value.result orelse return error.MissingRpcResult;
+
+            // Convert the raw JSON result back to string and then deserialize as RpcMessage
+            var result_buffer = std.ArrayList(u8).init(self.allocator);
+            defer result_buffer.deinit();
+
+            try std.json.stringify(result_value, .{}, result_buffer.writer());
+
+            // Now deserialize the result JSON as an RpcMessage
+            const parsed_result = try RpcMessage.deserialize2(self.allocator, result_buffer.items);
+            defer parsed_result.deinit();
+
+            // Validate response type matches request type
+            const is_valid_response = switch (req) {
+                .RequestVote => switch (parsed_result.value) {
+                    .RequestVoteResponse => true,
+                    else => false,
+                },
+                .AppendEntries => switch (parsed_result.value) {
+                    .AppendEntriesResponse => true,
+                    else => false,
+                },
+                .InstallSnapshot => switch (parsed_result.value) {
+                    .InstallSnapshotResponse => true,
+                    else => false,
+                },
+                .TimeoutNow, .ClientCommand => switch (parsed_result.value) {
+                    .Ack => true,
+                    else => false,
+                },
+                else => return error.InvalidRequestType,
+            };
+
+            if (!is_valid_response) {
+                std.log.warn("Response type mismatch for request type\n", .{});
+                return error.ResponseTypeMismatch;
+            }
+
+            return parsed_result.value;
         }
 
         // Helper function for JSON detection
@@ -1004,7 +1071,6 @@ pub fn RaftNode(comptime T: type) type {
                 self.match_index[i] = 0;
             }
 
-            // self.sendHeartbeats(cluster);
             self.sendHeartbeats();
         }
 
@@ -1201,12 +1267,19 @@ pub fn Cluster(comptime T: type) type {
             }
         }
 
+
+
         //for TCP, sockets transport; real network, distributed clusters
         pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
-            const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
-            const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
-            defer stream.close();
-            try msg.serialize(stream.writer());
+            // const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
+            // const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
+            // defer stream.close();
+            // try msg.serialize(stream.writer());
+            _ = self;
+            _ = to_id;
+            _ = msg;
+
+            @panic("deprecated; use RaftNode#sendRpc(...)");
         }
     };
 }
