@@ -21,7 +21,7 @@ pub const Peer = struct {
 };
 
 pub const StorageType = enum {
-    memory, // In-memory only (testing/volatile)
+    in_memory, // In-memory only (testing/volatile)
     persistent, // Disk-based storage (production)
     hybrid, // Memory + periodic persistence
 };
@@ -338,7 +338,7 @@ fn parseMessageFraming(framing_str: []const u8) !types.MessageFraming {
 }
 
 fn parseStorageType(storage_str: []const u8) !StorageType {
-    if (std.mem.eql(u8, storage_str, "memory")) return .memory;
+    if (std.mem.eql(u8, storage_str, "in_memory")) return .in_memory;
     if (std.mem.eql(u8, storage_str, "persistent")) return .persistent;
     if (std.mem.eql(u8, storage_str, "hybrid")) return .hybrid;
     return error.InvalidStorageType;

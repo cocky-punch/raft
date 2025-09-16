@@ -55,7 +55,7 @@ test "Follower becomes Candidate on election timeout" {
         \\  election_timeout_min_ms: 150
         \\  heartbeat_interval_ms: 50
         \\  max_entries_per_append: 100
-        \\  storage_type: "persistent"
+        \\  storage_type: "in_memory"
         \\  leader_lease_timeout_ms: 150
         \\
         \\transport:
@@ -70,6 +70,7 @@ test "Follower becomes Candidate on election timeout" {
         \\performance:
         \\  batch_append_entries: true
         \\  pre_vote_enabled: true
+        \\
     ) catch |err| {
         std.debug.print("Failed to parse config: {}\n", .{err});
         return;

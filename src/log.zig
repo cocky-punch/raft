@@ -677,9 +677,9 @@ pub const Log = union(enum) {
     persistent: PersistentLog,
 
     pub fn init(allocator: Allocator, opts: std.StringHashMap([]const u8)) !Log {
-        const storage_type_str = opts.get("storage_type") orelse "memory";
+        const storage_type_str = opts.get("storage_type") orelse "in_memory";
 
-        if (std.mem.eql(u8, storage_type_str, "memory")) {
+        if (std.mem.eql(u8, storage_type_str, "in_memory")) {
             const memory_log = try MemoryLog.init(allocator);
             return Log{ .memory = memory_log };
         } else if (std.mem.eql(u8, storage_type_str, "persistent")) {
