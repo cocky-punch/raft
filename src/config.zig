@@ -101,6 +101,7 @@ pub const Config = struct {
                     timeout_ms: ?u32 = null,
                     use_connection_pooling: ?bool = null,
                     max_connections_per_peer: ?u8 = null,
+                    use_ssl_tls: ?bool = null,
                 } = null,
                 msgpack_tcp: ?struct {
                     timeout_ms: ?u32 = null,

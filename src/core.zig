@@ -132,7 +132,6 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-
         //NOTE
         //in-memory transport only
         pub fn tick(self: *RaftNode(T), cluster: *Cluster(T)) void {
@@ -536,9 +535,9 @@ pub fn RaftNode(comptime T: type) type {
             };
 
             switch (self.config.transport) {
-                // .json_rpc_http => try self.sendJsonRpc(peer, req, false),
                 .json_rpc_http => {
-                    const response0 = try self.sendJsonRpc(peer, RpcMessage{ .AppendEntries = req }, false);
+                    //TODO http/https flag - from the config
+                    const response0 = try self.sendJsonRpc(peer, RpcMessage{ .AppendEntries = req });
                     const response = response0.AppendEntriesResponse;
 
                     // Handle Raft protocol response logic
@@ -611,15 +610,8 @@ pub fn RaftNode(comptime T: type) type {
             @panic("not implemented");
         }
 
-
-
         //TODO Json RPC via TCP
-        fn sendJsonRpc(
-            self: *Self,
-            peer: cfg.Peer,
-            req: RpcMessage,
-            use_https: bool
-        ) !RpcMessage {
+        fn sendJsonRpc(self: *Self, peer: cfg.Peer, req: RpcMessage) !RpcMessage {
             const method = switch (req) {
                 .RequestVote => "requestVote",
                 .AppendEntries => "appendEntries",
@@ -627,6 +619,11 @@ pub fn RaftNode(comptime T: type) type {
                 .TimeoutNow => "timeoutNow",
                 .ClientCommand => "clientCommand",
                 else => return error.InvalidRequestType,
+            };
+
+            const transport_config = switch (self.config.transport) {
+                .json_rpc_http => |c| c,
+                else => return error.InvalidTransport,
             };
 
             const rpc_request = struct {
@@ -645,30 +642,21 @@ pub fn RaftNode(comptime T: type) type {
 
             var client = std.http.Client{
                 .allocator = self.allocator,
-                //FIXME
-                // .ca_bundle = if (use_https) .{ .rescan = true } else .none,
+                //FIXME: proper field in std.http.Client ?
+                // .ca_bundle = if (transport_config.use_ssl_tls) .{ .rescan = true } else .none,
             };
             defer client.deinit();
-
-            const protocol = if (use_https) "https" else "http";
+            const protocol = if (transport_config.use_ssl_tls) "https" else "http";
             const url = try std.fmt.allocPrint(self.allocator, "{s}://{any}:{any}/rpc", .{ protocol, peer.ip, peer.port });
             defer self.allocator.free(url);
             const uri = try std.Uri.parse(url);
-            const transport_config = switch (self.config.transport) {
-                .json_rpc_http => |c| c,
-                else => return error.InvalidTransport,
-            };
 
             // Set up request with proper headers
             var server_header_buffer: [2048]u8 = undefined;
-            var request = try client.open(.POST, uri, .{
-                .server_header_buffer = &server_header_buffer,
-                .headers = .{
-                    .content_type = .{ .override = "application/json" },
-                    .user_agent = .{ .override = "raft-node/1.0" },
-                },
-                .keep_alive = transport_config.use_connection_pooling
-            });
+            var request = try client.open(.POST, uri, .{ .server_header_buffer = &server_header_buffer, .headers = .{
+                .content_type = .{ .override = "application/json" },
+                .user_agent = .{ .override = "raft-node/1.0" },
+            }, .keep_alive = transport_config.use_connection_pooling });
             defer request.deinit();
 
             // Send request
@@ -1266,8 +1254,6 @@ pub fn Cluster(comptime T: type) type {
                 try node.processMessages(self);
             }
         }
-
-
 
         //for TCP, sockets transport; real network, distributed clusters
         pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {

@@ -114,6 +114,7 @@ pub const Transport = union(enum) {
         use_connection_pooling: bool = true,
         timeout_ms: u32 = 5000,
         max_connections_per_peer: u8 = 5,
+        use_ssl_tls: bool = false,
     },
     grpc: struct {
         use_connection_pooling: bool = true,
