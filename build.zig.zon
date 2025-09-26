@@ -36,9 +36,15 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
+        // .yaml = .{
+        //     .url = "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.1.1.tar.gz",
+        //     .hash = "zig_yaml-0.1.0-C1161miEAgBCwL3YAEQZwV_4GyaaT2Xqj9nKB6hNe_TL",
+        // },
+        //
+        // (patched)
         .yaml = .{
-            .url = "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.1.1.tar.gz",
-            .hash = "zig_yaml-0.1.0-C1161miEAgBCwL3YAEQZwV_4GyaaT2Xqj9nKB6hNe_TL",
+            .url = "git+https://github.com/GildedHonour/zig-yaml?ref=zig-v0.15#7576927beda9ea0e393795612926bee1d80d1e0a",
+            .hash = "zig_yaml-0.1.0-C1161hqtAgAAwKEWcKoKF3NqO8mZ2IDO1nFFxcZHsvM1",
         },
     },
     .paths = .{

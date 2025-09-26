@@ -114,8 +114,46 @@ pub const WALRecord = struct {
         }
     }
 
+    //old
+    // pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
+    //     const record_type_raw = try reader.readByte();
+    //     const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
+
+    //     var record = WALRecord{
+    //         .record_type = record_type,
+    //         .data = undefined,
+    //     };
+
+    //     switch (record_type) {
+    //         .append_entry => {
+    //             record.data = .{ .append_entry = try LogEntry.deserialize(allocator, reader) };
+    //         },
+    //         .truncate_from => {
+    //             record.data = .{ .truncate_from = try reader.readInt(u64, .little) };
+    //         },
+    //         .update_term => {
+    //             record.data = .{ .update_term = try reader.readInt(u64, .little) };
+    //         },
+    //         .set_voted_for => {
+    //             const has_vote = (try reader.readByte()) != 0;
+    //             const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
+    //             record.data = .{ .set_voted_for = voted_for };
+    //         },
+    //         .checkpoint => {
+    //             record.data = .{ .checkpoint = {} };
+    //         },
+    //     }
+
+    //     return record;
+    // }
+
+
+    //new, zig v0.15
     pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
-        const record_type_raw = try reader.readByte();
+        // Read a single byte for record type
+        var byte_buffer: [1]u8 = undefined;
+        _ = try reader.read(&byte_buffer);
+        const record_type_raw = byte_buffer[0];
         const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
 
         var record = WALRecord{
@@ -128,21 +166,38 @@ pub const WALRecord = struct {
                 record.data = .{ .append_entry = try LogEntry.deserialize(allocator, reader) };
             },
             .truncate_from => {
-                record.data = .{ .truncate_from = try reader.readInt(u64, .little) };
+                // Read 8 bytes for u64 in little endian
+                var int_buffer: [8]u8 = undefined;
+                _ = try reader.read(&int_buffer);
+                const value = std.mem.readInt(u64, &int_buffer, .little);
+                record.data = .{ .truncate_from = value };
             },
             .update_term => {
-                record.data = .{ .update_term = try reader.readInt(u64, .little) };
+                // Read 8 bytes for u64 in little endian
+                var int_buffer: [8]u8 = undefined;
+                _ = try reader.read(&int_buffer);
+                const value = std.mem.readInt(u64, &int_buffer, .little);
+                record.data = .{ .update_term = value };
             },
             .set_voted_for => {
-                const has_vote = (try reader.readByte()) != 0;
-                const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
+                // Read has_vote flag
+                var byte_buffer2: [1]u8 = undefined;
+                _ = try reader.read(&byte_buffer2);
+                const has_vote = byte_buffer2[0] != 0;
+
+                const voted_for = if (has_vote) blk: {
+                    // Read 4 bytes for u32 in little endian
+                    var int_buffer: [4]u8 = undefined;
+                    _ = try reader.read(&int_buffer);
+                    break :blk std.mem.readInt(u32, &int_buffer, .little);
+                } else null;
+
                 record.data = .{ .set_voted_for = voted_for };
             },
             .checkpoint => {
                 record.data = .{ .checkpoint = {} };
             },
         }
-
         return record;
     }
 };
@@ -196,9 +251,16 @@ pub const PersistentLog = struct {
             .log_file = log_file,
             .state_file = state_file,
             .wal_file = wal_file,
-            .entries = ArrayList(LogEntry).init(allocator),
+
+            // .entries = ArrayList(LogEntry).init(allocator),
+            .entries = .empty,
+
             .persistent_state = PersistentState{ .current_term = 0, .voted_for = null },
-            .wal_buffer = ArrayList(WALRecord).init(allocator),
+
+            // .wal_buffer = ArrayList(WALRecord).init(allocator),
+            .wal_buffer = .empty,
+
+
             .last_checkpoint_pos = 0,
         };
 
@@ -240,7 +302,13 @@ pub const PersistentLog = struct {
         }
 
         try self.wal_file.seekTo(0);
-        var reader = self.wal_file.reader();
+
+
+        //TODO
+        // var reader = self.wal_file.reader();
+        var file_buffer: [4096]u8 = undefined;
+        var reader = self.wal_file.reader(&file_buffer);
+
 
         // Find last checkpoint position
         var current_pos: u64 = 0;
@@ -581,7 +649,9 @@ pub const MemoryLog = struct {
     pub fn init(allocator: Allocator) !MemoryLog {
         return MemoryLog{
             .allocator = allocator,
-            .entries = ArrayList(LogEntry).init(allocator),
+            // .entries = ArrayList(LogEntry).init(allocator),
+            .entries = .empty,
+
             .persistent_state = PersistentState{ .current_term = 0, .voted_for = null },
         };
     }

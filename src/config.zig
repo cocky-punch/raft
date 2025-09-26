@@ -74,7 +74,8 @@ pub const Config = struct {
         yaml_parser.load(allocator) catch |err| switch (err) {
             error.ParseFailure => {
                 if (yaml_parser.parse_errors.errorMessageCount() > 0) {
-                    yaml_parser.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+                    // yaml_parser.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+                     yaml_parser.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.fs.File.stderr()) });
                 }
                 return error.ParseFailure;
             },

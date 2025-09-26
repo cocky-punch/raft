@@ -1202,14 +1202,20 @@ pub fn Cluster(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) @This() {
             return Self{
                 .allocator = allocator,
-                .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
+
+                // .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
+                .nodes = .empty,
+
+
                 .node_addresses = std.AutoHashMap(NodeId, t.PeerAddress).init(allocator),
             };
         }
 
         pub fn deinit(self: *Self) void {
             // Assuming Cluster does not own RaftNode(T) memory
-            self.nodes.deinit();
+            // self.nodes.deinit();
+            // self.nodes.deinit(Self.allocator); // error - won't compile
+            self.nodes.deinit(self.allocator);
         }
 
         //for "in-memory" transport; simulation
