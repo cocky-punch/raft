@@ -86,8 +86,8 @@ pub fn RaftNode(comptime T: type) type {
                 .config = config,
                 .allocator = allocator,
                 .log = log,
-                .inbox = std.ArrayList(RpcMessage).init(allocator),
-                .nodes_buffer = std.ArrayList(cfg.Peer).init(allocator),
+                .inbox = .empty,
+                .nodes_buffer = .empty,
                 .next_index = next_index,
                 .match_index = match_index,
                 .node_id_to_index = node_id_to_index,
@@ -96,9 +96,17 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            self.allocator.free(self.next_index);
+            self.allocator.free(self.match_index);
+            self.log.deinit();
+            self.config.deinit(self.allocator);
+
             self.node_id_to_index.deinit();
-            self.inbox.deinit();
-            self.nodes_buffer.deinit();
+            self.inbox.deinit(self.allocator);
+            self.nodes_buffer.deinit(self.allocator);
+
+            //TODO
+            // deinit self.snapshot
         }
 
         fn startElection(self: *RaftNode(T), cluster: *Cluster(T)) void {
@@ -134,7 +142,7 @@ pub fn RaftNode(comptime T: type) type {
 
         //NOTE
         //in-memory transport only
-        pub fn tick(self: *RaftNode(T), cluster: *Cluster(T)) void {
+        pub fn processInMemoryData(self: *RaftNode(T), cluster: *Cluster(T)) void {
             const now = std.time.milliTimestamp();
 
             // Process incoming messages first
@@ -213,10 +221,12 @@ pub fn RaftNode(comptime T: type) type {
             self.election_deadline = now_ms + ElectionTimeoutBase + jitter;
         }
 
+        //in-memory only
         pub fn enqueueMessage(self: *RaftNode(T), msg: RpcMessage) !void {
-            try self.inbox.append(msg);
+            try self.inbox.append(self.allocator, msg);
         }
 
+        //in-memory only
         pub fn processMessages(self: *RaftNode(T), cluster: *Cluster(T)) !void {
             while (self.inbox.items.len > 0) {
                 if (self.inbox.pop()) |msg| {
@@ -514,13 +524,13 @@ pub fn RaftNode(comptime T: type) type {
             const last_index = self.log.getLastIndex();
 
             // Collect entries to send
-            var entries_to_send = std.ArrayList(LogEntry).init(self.allocator);
-            defer entries_to_send.deinit();
+            var entries_to_send: std.ArrayList(LogEntry) = .empty;
+            defer entries_to_send.deinit(self.allocator);
 
             var current_index = next_idx;
             while (current_index <= last_index) {
                 if (self.log.getEntry(current_index)) |entry| {
-                    try entries_to_send.append(entry.*);
+                    try entries_to_send.append(self.allocator, entry.*);
                 }
                 current_index += 1;
             }
@@ -591,6 +601,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
+        //FIXME
         fn sendInMemory(self: *Self, peer: cfg.Peer, req: t.AppendEntries) !t.AppendEntriesResponse {
             // const target_node = self.transport.in_memory.cluster.getNode(peer.id) orelse return error.PeerNotFound;
             // const response = target_node.handleAppendEntries(req);
@@ -610,8 +621,9 @@ pub fn RaftNode(comptime T: type) type {
             @panic("not implemented");
         }
 
-        //TODO Json RPC via TCP
-        fn sendJsonRpc(self: *Self, peer: cfg.Peer, req: RpcMessage) !RpcMessage {
+        //FIXME
+        // send Json RPC via TCP
+        fn sendJsonRpc_old_1(self: *Self, peer: cfg.Peer, req: RpcMessage) !RpcMessage {
             const method = switch (req) {
                 .RequestVote => "requestVote",
                 .AppendEntries => "appendEntries",
@@ -622,7 +634,7 @@ pub fn RaftNode(comptime T: type) type {
             };
 
             const transport_config = switch (self.config.transport) {
-                .json_rpc_http => |c| c,
+                .json_rpc_http => |x| x,
                 else => return error.InvalidTransport,
             };
 
@@ -637,56 +649,47 @@ pub fn RaftNode(comptime T: type) type {
                 .id = @intCast(std.time.timestamp() & 0xFFFFFFFF),
             };
 
-            const json_payload = try std.json.stringifyAlloc(self.allocator, rpc_request, .{});
-            defer self.allocator.free(json_payload);
+            //TODO
+            // const json_payload = try std.json.stringifyAlloc(self.allocator, rpc_request, .{});
+            const fmt = std.json.fmt(rpc_request, .{ .whitespace = .indent_2 });
+            var w = std.Io.Writer.Allocating.init(self.allocator);
+            try fmt.format(&w.writer);
+            // const json_payload = try w.toOwnedSlice();
 
-            var client = std.http.Client{
-                .allocator = self.allocator,
-                //FIXME: proper field in std.http.Client ?
-                // .ca_bundle = if (transport_config.use_ssl_tls) .{ .rescan = true } else .none,
-            };
-            defer client.deinit();
             const protocol = if (transport_config.use_ssl_tls) "https" else "http";
             const url = try std.fmt.allocPrint(self.allocator, "{s}://{any}:{any}/rpc", .{ protocol, peer.ip, peer.port });
             defer self.allocator.free(url);
-            const uri = try std.Uri.parse(url);
 
-            // Set up request with proper headers
-            var server_header_buffer: [2048]u8 = undefined;
-            var request = try client.open(.POST, uri, .{ .server_header_buffer = &server_header_buffer, .headers = .{
-                .content_type = .{ .override = "application/json" },
-                .user_agent = .{ .override = "raft-node/1.0" },
-            }, .keep_alive = transport_config.use_connection_pooling });
-            defer request.deinit();
+            // response writer
+            var allocating = std.Io.Writer.Allocating.init(self.allocator);
+            defer allocating.deinit();
 
-            // Send request
-            request.transfer_encoding = .{ .content_length = json_payload.len };
-            try request.send();
-            try request.writeAll(json_payload);
-            try request.finish();
+            const opts: std.http.Client.FetchOptions = .{
+                .method = .POST,
+                .location = .{ .url = url },
 
-            // Wait for response
-            try request.wait();
+                //FIXME
+                // .payload = json_payload,
+                // .payload = jsonrpc_request,
 
-            // Check HTTP status
-            if (request.response.status != .ok) {
-                std.log.warn("HTTP error {} from peer {}\n", .{ @intFromEnum(request.response.status), peer.id });
-                return error.HttpError;
-            }
+                .response_writer = &allocating.writer,
+                .headers = .{
+                    .content_type = .{ .override = "application/json" },
+                    .user_agent = .{ .override = "raft-node/1.0" },
+                },
 
-            // Read response body with proper buffer management
-            const body_max_size = 65536;
-            const response_buffer = try self.allocator.alloc(u8, body_max_size);
-            defer self.allocator.free(response_buffer);
+                //TODO
+                // https
+                // .ca_bundle = if (transport_config.use_ssl_tls) .{ .rescan = true } else .none,
+            };
 
-            const response_len = try request.readAll(response_buffer);
-            const actual_body = response_buffer[0..response_len];
+            var client: std.http.Client = .{
+                .allocator = self.allocator,
+                .write_buffer_size = 8192,
+            };
 
-            // Detect transport mismatch
-            if (!isJsonData(actual_body)) {
-                self.detectTransportMismatch(peer.ip, actual_body);
-                return error.TransportMismatch;
-            }
+            defer client.deinit();
+            const result = try client.fetch(opts);
 
             // Parse JSON-RPC response envelope first (result is still raw JSON)
             const JsonRpcResponse = struct {
@@ -699,16 +702,44 @@ pub fn RaftNode(comptime T: type) type {
                 id: u32,
             };
 
-            const rpc_response = std.json.parseFromSlice(JsonRpcResponse, self.allocator, actual_body, .{}) catch |err| {
-                std.log.warn("Failed to parse JSON-RPC response from peer {}: {}\n", .{ peer.id, err });
-                return error.InvalidJsonRpcResponse;
+            // Check HTTP status
+            if (result.status != .ok) {
+                std.log.warn("HTTP error {} from peer {}\n", .{ @intFromEnum(result.status), peer.id });
+                return error.HttpError;
+            }
+
+            // Parse JSON-RPC response
+            const response_text = allocating.written();
+            const parsed = std.json.parseFromSlice(
+                JsonRpcResponse,
+                self.allocator,
+                response_text,
+                .{},
+            ) catch |err| {
+                std.log.err("Failed to parse JSON-RPC response: {}", .{err});
+                std.debug.print("Raw response:\n{s}\n", .{response_text});
+                return err;
             };
-            defer rpc_response.deinit();
+            defer parsed.deinit();
+
+            const rpc_response = parsed.value;
+
+            // Validate JSON-RPC version
+            if (!std.mem.eql(u8, rpc_response.jsonrpc, "2.0")) {
+                std.log.err("Invalid JSON-RPC version: {s}", .{rpc_response.jsonrpc});
+                return error.RpcError;
+            }
 
             // Check for JSON-RPC errors
-            if (rpc_response.value.@"error") |rpc_error| {
+            if (rpc_response.@"error") |rpc_error| {
                 std.log.warn("JSON-RPC error from peer {}: {} - {s}\n", .{ peer.id, rpc_error.code, rpc_error.message });
                 return error.RpcError;
+            }
+
+            // Validate response ID matches request ID
+            if (rpc_response.id != rpc_request.id) {
+                std.log.warn("JSON-RPC response ID mismatch from peer {}: expected {}, got {}\n", .{ peer.id, rpc_request.id, rpc_response.id });
+                return error.RpcIdMismatch;
             }
 
             // Validate response ID matches request ID
@@ -717,19 +748,213 @@ pub fn RaftNode(comptime T: type) type {
                 return error.RpcIdMismatch;
             }
 
-            const result_value = rpc_response.value.result orelse return error.MissingRpcResult;
+            // Extract result
+            const result_value = rpc_response.result orelse {
+                std.log.err("Missing result in JSON-RPC response\n", .{});
+                return error.MissingRpcResult;
+            };
 
-            // Convert the raw JSON result back to string and then deserialize as RpcMessage
-            var result_buffer = std.ArrayList(u8).init(self.allocator);
-            defer result_buffer.deinit();
+            // Print successful result
+            std.debug.print("JSON-RPC Response ID: {}\n", .{rpc_response.id});
+            std.debug.print("Result (raw): ", .{});
 
-            try std.json.stringify(result_value, .{}, result_buffer.writer());
+            var out = std.Io.Writer.Allocating.init(self.allocator);
+            defer out.deinit();
+            var stringifier = std.json.Stringify{
+                .writer = &out.writer,
+                .options = .{ .whitespace = .indent_2 },
+            };
+            try stringifier.write(result_value);
 
-            // Now deserialize the result JSON as an RpcMessage
-            const parsed_result = try RpcMessage.deserialize2(self.allocator, result_buffer.items);
+            //DEBUG
+            std.debug.print("{s}\n\n", .{out.writer.buffered()});
+
+            // Convert the raw JSON result back to string for deserialization
+            var result_out = std.Io.Writer.Allocating.init(self.allocator);
+            defer result_out.deinit();
+
+            var result_stringifier = std.json.Stringify{
+                .writer = &result_out.writer,
+                .options = .{},
+            };
+            try result_stringifier.write(result_value);
+
+            // Handle different result types
+            if (result_value == .object) {
+                // If a result is an object, deserialize it
+                const parsed_result = try std.json.parseFromSlice(
+                    RpcMessage,
+                    self.allocator,
+                    result_out.writer.buffered(),
+                    .{},
+                );
+                defer parsed_result.deinit();
+
+                // Validate response type matches request type
+                const is_valid_response = switch (req) {
+                    .RequestVote => switch (parsed_result.value) {
+                        .RequestVoteResponse => true,
+                        else => false,
+                    },
+                    .AppendEntries => switch (parsed_result.value) {
+                        .AppendEntriesResponse => true,
+                        else => false,
+                    },
+                    .InstallSnapshot => switch (parsed_result.value) {
+                        .InstallSnapshotResponse => true,
+                        else => false,
+                    },
+                    .TimeoutNow, .ClientCommand => switch (parsed_result.value) {
+                        .Ack => true,
+                        else => false,
+                    },
+                    else => return error.InvalidRequestType,
+                };
+
+                if (!is_valid_response) {
+                    std.log.warn("Response type mismatch for request type\n", .{});
+                    return error.ResponseTypeMismatch;
+                }
+
+                return parsed_result.value;
+            } else {
+                std.debug.print("Result type: {}\n", .{result_value});
+                return error.ResponseTypeMismatch;
+            }
+        }
+
+        fn sendJsonRpc(self: *Self, peer: cfg.Peer, req: RpcMessage) !RpcMessage {
+            const method = switch (req) {
+                .RequestVote => "requestVote",
+                .AppendEntries => "appendEntries",
+                .InstallSnapshot => "installSnapshot",
+                .TimeoutNow => "timeoutNow",
+                .ClientCommand => "clientCommand",
+                else => return error.InvalidRequestType,
+            };
+
+            const transport_config = switch (self.config.transport) {
+                .json_rpc_http => |x| x,
+                else => return error.InvalidTransport,
+            };
+
+            const rpc_request = struct {
+                jsonrpc: []const u8 = "2.0",
+                method: []const u8,
+                params: RpcMessage,
+                id: u32,
+            }{
+                .method = method,
+                .params = req,
+                // timestamp() returns an integer - keep it within u32
+                .id = @intCast(std.time.timestamp() & 0xFFFFFFFF),
+            };
+
+            // Serialize JSON-RPC request into an allocating writer
+            var payload_writer = std.Io.Writer.Allocating.init(self.allocator);
+            // keep payload_writer alive until after fetch so the slice remains valid
+            const fmt = std.json.fmt(rpc_request, .{ .whitespace = .indent_2 });
+            try fmt.format(&payload_writer.writer);
+            const protocol = if (transport_config.use_ssl_tls) "https" else "http";
+            const url = try std.fmt.allocPrint(self.allocator, "{s}://{any}:{any}/rpc", .{ protocol, peer.ip, peer.port });
+            defer self.allocator.free(url);
+
+            // Prepare response writer (kept alive until after parsing)
+            var response_writer = std.Io.Writer.Allocating.init(self.allocator);
+            defer response_writer.deinit();
+            const opts: std.http.Client.FetchOptions = .{
+                .method = .POST,
+                .location = .{ .url = url },
+                .payload = payload_writer.writer.buffered(), // []const u8 payload
+                .response_writer = &response_writer.writer,
+                .headers = .{
+                    .content_type = .{ .override = "application/json" },
+                    // TODO: add user-agent or other headers
+                },
+            };
+
+            var client: std.http.Client = .{
+                .allocator = self.allocator,
+                .write_buffer_size = 8192,
+            };
+
+            defer client.deinit();
+            const result = try client.fetch(opts);
+
+            // check HTTP status
+            if (result.status != .ok) {
+                std.log.warn("HTTP error {} from peer {}\n", .{ @intFromEnum(result.status), peer.id });
+                // deinit payload_writer before returning so its resources are freed
+                payload_writer.deinit();
+                return error.HttpError;
+            }
+
+            // get response bytes (they live in response_writer while it is not deinit'ed)
+            const response_slice = response_writer.writer.buffered();
+
+            // Parse JSON-RPC response envelope
+            const JsonRpcResponse = struct {
+                jsonrpc: []const u8,
+                result: ?std.json.Value = null,
+                @"error": ?struct {
+                    code: i32,
+                    message: []const u8,
+                } = null,
+                id: u32,
+            };
+
+            const parsed = std.json.parseFromSlice(JsonRpcResponse, self.allocator, response_slice, .{}) catch |err| {
+                std.log.err("Failed to parse JSON-RPC response from peer {}: {}\n", .{ peer.id, err });
+                payload_writer.deinit();
+                return error.InvalidJsonRpcResponse;
+            };
+
+            defer parsed.deinit();
+            const rpc_response = parsed.value;
+
+            if (!std.mem.eql(u8, rpc_response.jsonrpc, "2.0")) {
+                std.log.err("Invalid JSON-RPC version: {s}", .{rpc_response.jsonrpc});
+                payload_writer.deinit();
+                return error.RpcError;
+            }
+
+            if (rpc_response.@"error") |rpc_error| {
+                std.log.warn("JSON-RPC error from peer {}: {} - {s}\n", .{ peer.id, rpc_error.code, rpc_error.message });
+                payload_writer.deinit();
+                return error.RpcError;
+            }
+
+            if (rpc_response.id != rpc_request.id) {
+                std.log.warn("JSON-RPC response ID mismatch from peer {}: expected {}, got {}\n", .{ peer.id, rpc_request.id, rpc_response.id });
+                payload_writer.deinit();
+                return error.RpcIdMismatch;
+            }
+
+            const result_value = rpc_response.result orelse {
+                std.log.err("Missing result in JSON-RPC response\n", .{});
+                payload_writer.deinit();
+                return error.MissingRpcResult;
+            };
+
+            // stringify the json::Value result into a buffer so we can parse it as RpcMessage
+            var result_out = std.Io.Writer.Allocating.init(self.allocator);
+            defer result_out.deinit();
+
+            var result_stringifier = std.json.Stringify{
+                .writer = &result_out.writer,
+                .options = .{},
+            };
+            try result_stringifier.write(result_value);
+
+            // Now parse the result JSON back into RpcMessage
+            const parsed_result = std.json.parseFromSlice(RpcMessage, self.allocator, result_out.writer.buffered(), .{}) catch |err| {
+                std.log.err("Failed to parse RPC result into RpcMessage: {}\n", .{err});
+                payload_writer.deinit();
+                return error.InvalidRpcResult;
+            };
             defer parsed_result.deinit();
 
-            // Validate response type matches request type
+            // Validate response type matches the request type
             const is_valid_response = switch (req) {
                 .RequestVote => switch (parsed_result.value) {
                     .RequestVoteResponse => true,
@@ -747,18 +972,21 @@ pub fn RaftNode(comptime T: type) type {
                     .Ack => true,
                     else => false,
                 },
-                else => return error.InvalidRequestType,
+                else => false,
             };
 
             if (!is_valid_response) {
                 std.log.warn("Response type mismatch for request type\n", .{});
+                payload_writer.deinit();
                 return error.ResponseTypeMismatch;
             }
 
-            return parsed_result.value;
+            const out_msg = parsed_result.value;
+            payload_writer.deinit();
+            return out_msg;
         }
 
-        // Helper function for JSON detection
+        // JSON detection
         fn isJsonData(data: []const u8) bool {
             const trimmed = std.mem.trim(u8, data, " \t\r\n");
             return trimmed.len > 0 and (trimmed[0] == '{' or trimmed[0] == '[');
@@ -1120,7 +1348,7 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         fn triggerReplication(self: *Self) !void {
-            // Implementation depends on your replication mechanism
+            // Implementation depends on a replication mechanism
             // This might involve:
             // 1. Sending AppendEntries RPCs to all followers
             // 2. Starting async replication tasks
@@ -1135,7 +1363,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        // Enhanced version based on your reference - handles both heartbeats and log replication
+        // this handles both: heartbeats and log replication
         fn sendAppendEntries(self: *Self, peer: cfg.Peer) !void {
             const peer_index = self.getPeerIndex(peer.id) orelse {
                 std.log.err("Peer {} not found in peers array", .{peer.id});
@@ -1202,11 +1430,7 @@ pub fn Cluster(comptime T: type) type {
         pub fn init(allocator: std.mem.Allocator) @This() {
             return Self{
                 .allocator = allocator,
-
-                // .nodes = std.ArrayList(*RaftNode(T)).init(allocator),
                 .nodes = .empty,
-
-
                 .node_addresses = std.AutoHashMap(NodeId, t.PeerAddress).init(allocator),
             };
         }
@@ -1250,9 +1474,9 @@ pub fn Cluster(comptime T: type) type {
             }
         }
 
-        pub fn tick(self: *Self) !void {
+        pub fn processInMemoryData(self: *Self) !void {
             for (self.nodes.items) |node| {
-                node.tick(self);
+                node.processInMemoryData(self);
             }
 
             //TODO: merge the loops

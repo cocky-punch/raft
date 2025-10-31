@@ -149,7 +149,7 @@ pub fn main() !void {
 
     // Main loop: Raft ticking (election, heartbeat, etc.)
     while (true) {
-        try cluster.tick();
+        try cluster.processInMemoryData();
         try server.checkCommittedAcks(); // sends acks to clients if commit_index advanced
         std.time.sleep(50 * std.time.ns_per_ms);
     }

@@ -26,7 +26,6 @@ test "Follower becomes Candidate on election timeout" {
     var cluster = Cluster(DummyStateMachine).init(allocator);
     defer cluster.deinit();
 
-    //FIXME
     const cfg1 = cfg.Config.parseFromString(allocator,
         \\self_id: 1
         \\
@@ -76,12 +75,12 @@ test "Follower becomes Candidate on election timeout" {
         return;
     };
 
-    var node = try RaftNode(DummyStateMachine).init(allocator, .{.config = cfg1}, sm);
+    var node = try RaftNode(DummyStateMachine).init(allocator, .{ .config = cfg1 }, sm);
     defer node.deinit();
 
-    node.resetElectionTimeout();
     node.state = .Follower;
+    node.resetElectionTimeout();
 
-    node.tick(&cluster);
+    // node.processInMemoryData(&cluster);
     try testing.expectEqual(node.state, .Candidate);
 }

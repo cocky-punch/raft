@@ -23,19 +23,69 @@ pub const LogEntry = struct {
         try writer.writeAll(self.data);
     }
 
-    pub fn deserialize(allocator: Allocator, reader: anytype) !LogEntry {
-        const term = try reader.readInt(u64, .little);
-        const index = try reader.readInt(u64, .little);
-        const data_len = try reader.readInt(u64, .little);
+    fn readExact2(comptime T: type, reader: *std.fs.File.Reader) !T {
+        var buf: [@sizeOf(T)]u8 = undefined;
 
-        const data = try allocator.alloc(u8, data_len);
-        try reader.readNoEof(data);
+        var filled: usize = 0;
+        while (filled < buf.len) {
+            const n = try reader.read(buf[filled..]);
+            if (n == 0) return error.EndOfStream;
+            filled += n;
+        }
+
+        const builtin = @import("builtin");
+        if (builtin.target.cpu.arch.endian() == .little) {
+            return std.mem.bytesToValue(T, &buf);
+        } else {
+            std.mem.reverse(u8, &buf);
+            return std.mem.bytesToValue(T, &buf);
+        }
+    }
+
+    pub fn deserialize(allocator: std.mem.Allocator, reader: *std.fs.File.Reader) !LogEntry {
+        const term = try readExactInt(u64, reader);
+        const index = try readExactInt(u64, reader);
+        const data_len = try readExactInt(u64, reader);
+
+        const len = std.math.cast(usize, data_len) orelse return error.Overflow;
+        var data = try allocator.alloc(u8, len);
+
+        var filled: usize = 0;
+        while (filled < len) {
+            const n = try reader.read(data[filled..]);
+            if (n == 0) return error.EndOfStream;
+            filled += n;
+        }
 
         return LogEntry{
             .term = term,
             .index = index,
             .data = data,
         };
+    }
+
+    pub fn deserialize2_2(allocator: std.mem.Allocator, file: *std.fs.File) !LogEntry {
+        _ = allocator;
+        _ = file;
+
+        @panic("not adjusted yet for the v-0.15");
+    }
+
+    /// Reads exactly `@sizeOf(T)` bytes and returns integer in little-endian.
+    fn readExactInt(comptime T: type, reader: *std.fs.File.Reader) !T {
+        var buf: [@sizeOf(T)]u8 = undefined;
+        try readExact(reader, &buf);
+        return std.mem.readInt(T, &buf, .little);
+    }
+
+    /// Ensures full buffer is filled or returns `error.EndOfStream`.
+    fn readExact(reader: *std.fs.File.Reader, buf: []u8) !void {
+        var total: usize = 0;
+        while (total < buf.len) {
+            const n = try reader.read(buf[total..]);
+            if (n == 0) return error.EndOfStream;
+            total += n;
+        }
     }
 
     // Create LogEntry from command (new API)
@@ -65,15 +115,19 @@ pub const PersistentState = struct {
         }
     }
 
+    //FIXME
     pub fn deserialize(reader: anytype) !PersistentState {
-        const current_term = try reader.readInt(u64, .little);
-        const has_vote = (try reader.readByte()) != 0;
-        const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
+        // const current_term = try reader.readInt(u64, .little);
+        // const has_vote = (try reader.readByte()) != 0;
+        // const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
 
-        return PersistentState{
-            .current_term = current_term,
-            .voted_for = voted_for,
-        };
+        // return PersistentState{
+        //     .current_term = current_term,
+        //     .voted_for = voted_for,
+        // };
+        _ = reader;
+
+        @panic("not adjusted yet for the v-0.15");
     }
 };
 
@@ -114,47 +168,12 @@ pub const WALRecord = struct {
         }
     }
 
-    //old
-    // pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
-    //     const record_type_raw = try reader.readByte();
-    //     const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
-
-    //     var record = WALRecord{
-    //         .record_type = record_type,
-    //         .data = undefined,
-    //     };
-
-    //     switch (record_type) {
-    //         .append_entry => {
-    //             record.data = .{ .append_entry = try LogEntry.deserialize(allocator, reader) };
-    //         },
-    //         .truncate_from => {
-    //             record.data = .{ .truncate_from = try reader.readInt(u64, .little) };
-    //         },
-    //         .update_term => {
-    //             record.data = .{ .update_term = try reader.readInt(u64, .little) };
-    //         },
-    //         .set_voted_for => {
-    //             const has_vote = (try reader.readByte()) != 0;
-    //             const voted_for = if (has_vote) try reader.readInt(u32, .little) else null;
-    //             record.data = .{ .set_voted_for = voted_for };
-    //         },
-    //         .checkpoint => {
-    //             record.data = .{ .checkpoint = {} };
-    //         },
-    //     }
-
-    //     return record;
-    // }
-
-
-    //new, zig v0.15
-    pub fn deserialize(allocator: Allocator, reader: anytype) !WALRecord {
-        // Read a single byte for record type
+    pub fn deserialize2_2(allocator: std.mem.Allocator, file: *std.fs.File) !WALRecord {
+        // Read 1 byte for record type
         var byte_buffer: [1]u8 = undefined;
-        _ = try reader.read(&byte_buffer);
-        const record_type_raw = byte_buffer[0];
-        const record_type = @as(WALRecordType, @enumFromInt(record_type_raw));
+        _ = try file.read(&byte_buffer);
+        const record_type_raw: u8 = byte_buffer[0];
+        const record_type: WALRecordType = @enumFromInt(record_type_raw);
 
         var record = WALRecord{
             .record_type = record_type,
@@ -163,33 +182,33 @@ pub const WALRecord = struct {
 
         switch (record_type) {
             .append_entry => {
-                record.data = .{ .append_entry = try LogEntry.deserialize(allocator, reader) };
+                // keep using the existing LogEntry deserializer
+                record.data = .{ .append_entry = try LogEntry.deserialize2_2(allocator, file) };
             },
             .truncate_from => {
-                // Read 8 bytes for u64 in little endian
                 var int_buffer: [8]u8 = undefined;
-                _ = try reader.read(&int_buffer);
-                const value = std.mem.readInt(u64, &int_buffer, .little);
+                _ = try file.read(&int_buffer);
+                // const value: u64 = std.mem.readIntSlice(u64, int_buffer[0..], .little);
+                const value: u64 = std.mem.readInt(u64, int_buffer[0..], .little);
                 record.data = .{ .truncate_from = value };
             },
             .update_term => {
-                // Read 8 bytes for u64 in little endian
                 var int_buffer: [8]u8 = undefined;
-                _ = try reader.read(&int_buffer);
-                const value = std.mem.readInt(u64, &int_buffer, .little);
+                _ = try file.read(&int_buffer);
+                // const value: u64 = std.mem.readIntSlice(u64, int_buffer[0..], .little);
+                const value: u64 = std.mem.readInt(u64, int_buffer[0..], .little);
                 record.data = .{ .update_term = value };
             },
             .set_voted_for => {
-                // Read has_vote flag
                 var byte_buffer2: [1]u8 = undefined;
-                _ = try reader.read(&byte_buffer2);
+                _ = try file.read(&byte_buffer2);
                 const has_vote = byte_buffer2[0] != 0;
 
                 const voted_for = if (has_vote) blk: {
-                    // Read 4 bytes for u32 in little endian
                     var int_buffer: [4]u8 = undefined;
-                    _ = try reader.read(&int_buffer);
-                    break :blk std.mem.readInt(u32, &int_buffer, .little);
+                    _ = try file.read(&int_buffer);
+                    // break :blk std.mem.readIntSlice(u32, int_buffer[0..], .little);
+                    break :blk std.mem.readInt(u32, int_buffer[0..], .little);
                 } else null;
 
                 record.data = .{ .set_voted_for = voted_for };
@@ -198,6 +217,7 @@ pub const WALRecord = struct {
                 record.data = .{ .checkpoint = {} };
             },
         }
+
         return record;
     }
 };
@@ -260,7 +280,6 @@ pub const PersistentLog = struct {
             // .wal_buffer = ArrayList(WALRecord).init(allocator),
             .wal_buffer = .empty,
 
-
             .last_checkpoint_pos = 0,
         };
 
@@ -288,8 +307,8 @@ pub const PersistentLog = struct {
             }
         }
 
-        self.entries.deinit();
-        self.wal_buffer.deinit();
+        self.entries.deinit(self.allocator);
+        self.wal_buffer.deinit(self.allocator);
         self.log_file.close();
         self.state_file.close();
         self.wal_file.close();
@@ -303,12 +322,14 @@ pub const PersistentLog = struct {
 
         try self.wal_file.seekTo(0);
 
-
         //TODO
-        // var reader = self.wal_file.reader();
-        var file_buffer: [4096]u8 = undefined;
-        var reader = self.wal_file.reader(&file_buffer);
+        // var file_buffer: [4096]u8 = undefined;
+        // var reader = self.wal_file.reader(&file_buffer);
 
+        var buf: [4096]u8 = undefined;
+        const reader = self.wal_file.reader(&buf);
+        //TODO
+        _ = reader;
 
         // Find last checkpoint position
         var current_pos: u64 = 0;
@@ -316,7 +337,11 @@ pub const PersistentLog = struct {
 
         while (current_pos < wal_size) {
             const pos_before_record = current_pos;
-            const record = WALRecord.deserialize(self.allocator, reader) catch break;
+
+            //FIXME
+            // const record = WALRecord.deserialize(&reader) catch break;
+            // const record = WALRecord.deserialize2(self.allocator, &reader) catch break;
+            const record = WALRecord.deserialize2_2(self.allocator, &self.wal_file) catch break;
 
             if (record.record_type == .checkpoint) {
                 last_checkpoint = pos_before_record;
@@ -332,14 +357,21 @@ pub const PersistentLog = struct {
 
         // Replay from last checkpoint
         try self.wal_file.seekTo(last_checkpoint);
-        reader = self.wal_file.reader();
+        // reader = self.wal_file.reader();
+        // reinit reader after seek
+        var buf2: [4096]u8 = undefined;
+        // var reader2 = self.wal_file.reader(&buf2);
+        _ = self.wal_file.reader(&buf2);
 
         while (true) {
-            const record = WALRecord.deserialize(self.allocator, reader) catch break;
+            // const record = WALRecord.deserialize(&reader) catch break;
+            // const record = WALRecord.deserialize2(self.allocator, &reader) catch break;
+            const record = WALRecord.deserialize2_2(self.allocator, &self.wal_file) catch break;
 
             switch (record.record_type) {
                 .append_entry => {
-                    try self.entries.append(record.data.append_entry);
+                    // try self.entries.append(record.data.append_entry);
+                    try self.entries.append(self.allocator, record.data.append_entry);
                 },
                 .truncate_from => {
                     const index = record.data.truncate_from;
@@ -368,7 +400,7 @@ pub const PersistentLog = struct {
     }
 
     fn writeWALRecord(self: *PersistentLog, record: WALRecord) !void {
-        try self.wal_buffer.append(record);
+        try self.wal_buffer.append(self.allocator, record);
 
         // Flush if buffer is getting full
         if (self.wal_buffer.items.len >= WAL_BUFFER_SIZE) {
@@ -377,20 +409,26 @@ pub const PersistentLog = struct {
     }
 
     fn flushWAL(self: *PersistentLog) !void {
-        if (self.wal_buffer.items.len == 0) return;
+        _ = self;
 
-        const file_size = try self.wal_file.getEndPos();
-        try self.wal_file.seekTo(file_size);
-        const writer = self.wal_file.writer();
+        // FIXME
+        // if (self.wal_buffer.items.len == 0) return;
 
-        for (self.wal_buffer.items) |*record| {
-            try record.serialize(writer);
-        }
+        // const file_size = try self.wal_file.getEndPos();
+        // try self.wal_file.seekTo(file_size);
+        // const writer = self.wal_file.writer();
 
-        try self.wal_file.sync(); // Force to disk
+        // for (self.wal_buffer.items) |*record| {
+        //     try record.serialize(writer);
+        // }
 
-        // Clear buffer but don't free append_entry data (it's owned by entries array)
-        self.wal_buffer.clearRetainingCapacity();
+        // try self.wal_file.sync(); // Force to disk
+
+        // // Clear buffer but don't free append_entry data (it's owned by entries array)
+        // self.wal_buffer.clearRetainingCapacity();
+        //
+
+        @panic("not adjusted yet for the v-0.15");
     }
 
     pub fn checkpoint(self: *PersistentLog) !void {
@@ -419,7 +457,7 @@ pub const PersistentLog = struct {
         self.wal_file.close();
 
         // Reopen with truncate
-        const data_dir = "raft_data"; // You might want to store this
+        const data_dir = "raft_data";
         var dir = try std.fs.cwd().openDir(data_dir, .{});
         defer dir.close();
 
@@ -436,10 +474,13 @@ pub const PersistentLog = struct {
         }
 
         try self.state_file.seekTo(0);
-        var reader = self.state_file.reader();
+
+        var file_buf: [4096]u8 = undefined;
+        var reader_wrapper = self.state_file.reader(&file_buf);
+        const reader = &reader_wrapper.interface;
 
         // Verify magic header
-        const magic = try reader.readInt(u32, .little);
+        const magic = try readU32Le(reader);
         if (magic != MAGIC_HEADER) {
             return error.CorruptedStateFile;
         }
@@ -447,73 +488,99 @@ pub const PersistentLog = struct {
         self.persistent_state = try PersistentState.deserialize(reader);
     }
 
+    //FIXME
     fn loadLog(self: *PersistentLog) !void {
         const file_size = try self.log_file.getEndPos();
-        if (file_size == 0) {
-            return; // Empty log file
-        }
+        if (file_size == 0) return;
 
         try self.log_file.seekTo(0);
-        var reader = self.log_file.reader();
 
-        // Verify magic header
-        const magic = try reader.readInt(u32, .little);
-        if (magic != MAGIC_HEADER) {
-            return error.CorruptedLogFile;
-        }
+        // file-backed reader context -> has `.interface`
+        var file_buf: [4096]u8 = undefined;
+        var fr_ctx = self.log_file.reader(&file_buf);
+        const r = &fr_ctx.interface; // *std.Io.Reader
 
-        // Read stored CRC32
-        const stored_crc = try reader.readInt(u32, .little);
+        // --- magic header
+        var magic_buf: [1]u32 = undefined;
+        try r.readSliceEndian(u32, magic_buf[0..], .little);
+        if (magic_buf[0] != MAGIC_HEADER) return error.CorruptedLogFile;
 
-        // Read all data
+        // --- stored CRC
+        var crc_buf: [1]u32 = undefined;
+        try r.readSliceEndian(u32, crc_buf[0..], .little);
+        const stored_crc = crc_buf[0];
+
+        // --- read remaining data into memory
         const data_start = try self.log_file.getPos();
-        const data_size = file_size - data_start;
+        const data_size_u64 = file_size - data_start;
+        const data_size = std.math.cast(usize, data_size_u64) orelse return error.Overflow;
+
         const data = try self.allocator.alloc(u8, data_size);
         defer self.allocator.free(data);
-        try reader.readNoEof(data);
 
-        // Verify CRC32
-        const calculated_crc = crc32.hash(data);
-        if (stored_crc != calculated_crc) {
-            return error.CorruptedLogFile;
-        }
+        try r.readSliceAll(data);
 
-        // Parse data
-        var data_stream = std.io.fixedBufferStream(data);
-        var data_reader = data_stream.reader();
+        const calculated_crc = std.hash.crc.Crc32.hash(data);
+        if (calculated_crc != stored_crc) return error.CorruptedLogFile;
 
-        // Read number of entries
-        const num_entries = try data_reader.readInt(u64, .little);
+        // --- parse entries from the in-memory buffer
 
-        // Load each entry
-        var i: u64 = 0;
-        while (i < num_entries) : (i += 1) {
-            const entry = LogEntry.deserialize(self.allocator, data_reader) catch |err| switch (err) {
-                error.EndOfStream => break, // Partial write
-                else => return err,
-            };
-            try self.entries.append(entry);
-        }
+        // var stream = std.Io.fixedBufferStream(data);
+
+        // // fixed-buffer stream's reader() returns a Reader *value* (no .interface)
+        // var stream_reader_val = stream.reader(); // value
+        // const dr = &stream_reader_val;           // *std.Io.Reader
+
+        // const num_buf: [1]u64 = undefined;
+        // // try dr.readSliceEndian(u64, num_buf[0..], .little);
+        // const num_entries = num_buf[0];
+
+        // var i: u64 = 0;
+        // while (i < num_entries) : (i += 1) {
+        //     const entry = LogEntry.deserialize(self.allocator, dr) catch |err| switch (err) {
+        //         error.EndOfStream => break,
+        //         else => return err,
+        //     };
+        //     try self.entries.append(self.allocator, entry);
+        // }
+    }
+
+    fn readU32Le(r: *std.Io.Reader) !u32 {
+        var value_buf: [1]u32 = undefined;
+        try r.readSliceEndian(u32, value_buf[0..], .little);
+        return value_buf[0];
+    }
+
+    fn readExact(comptime T: type, r: *std.Io.Reader) !T {
+        var tmp: [1]T = undefined;
+        try r.readSliceEndian(T, tmp[0..], .little);
+        return tmp[0];
+    }
+
+    fn writeU32Le(writer: *std.Io.Writer, value: u32) !void {
+        var buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &buf, value, .little);
+        _ = try writer.write(&buf);
     }
 
     pub fn persistState(self: *PersistentLog) !void {
-        // Serialize data to buffer first
-        var data_buffer = std.ArrayList(u8).init(self.allocator);
-        defer data_buffer.deinit();
+        var data_buffer: std.ArrayList(u8) = .empty;
+        defer data_buffer.deinit(self.allocator);
 
-        const data_writer = data_buffer.writer();
+        const data_writer = data_buffer.writer(self.allocator);
         try self.persistent_state.serialize(data_writer);
 
-        // Calculate CRC32
-        const data_crc = crc32.hash(data_buffer.items);
+        const data_crc: u32 = crc32.hash(data_buffer.items);
 
-        // Write to file
         try self.state_file.seekTo(0);
-        var writer = self.state_file.writer();
 
-        try writer.writeInt(u32, MAGIC_HEADER, .little);
-        try writer.writeInt(u32, data_crc, .little);
-        try writer.writeAll(data_buffer.items);
+        var file_buf: [4096]u8 = undefined;
+        var writer = self.state_file.writer(&file_buf);
+        try writeU32Le(&writer.interface, MAGIC_HEADER);
+        try writeU32Le(&writer.interface, data_crc);
+        try writer.interface.writeAll(data_buffer.items);
+
+        try writer.interface.flush();
         try self.state_file.sync();
     }
 
@@ -560,7 +627,7 @@ pub const PersistentLog = struct {
         try self.writeWALRecord(wal_record);
 
         // Then update in-memory state
-        try self.entries.append(owned_entry);
+        try self.entries.append(self.allocator, owned_entry);
     }
 
     pub fn appendSlice(self: *PersistentLog, entries: []const LogEntry) !void {
@@ -661,7 +728,7 @@ pub const MemoryLog = struct {
         for (self.entries.items) |entry| {
             self.allocator.free(entry.data);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn append(self: *MemoryLog, entry: LogEntry) !void {
@@ -673,7 +740,7 @@ pub const MemoryLog = struct {
             .data = owned_data,
         };
 
-        try self.entries.append(owned_entry);
+        try self.entries.append(self.allocator, owned_entry);
     }
 
     pub fn appendSlice(self: *MemoryLog, entries: []const LogEntry) !void {
@@ -861,19 +928,20 @@ pub const Log = union(enum) {
         return null; // Index doesn't exist
     }
 
+    //TODO
     pub fn sliceFrom(self: *Log, allocator: Allocator, start_index: u64) ![]LogEntry {
         const last_index = self.getLastIndex();
         if (start_index > last_index) {
             return &[_]LogEntry{}; // Empty slice
         }
 
-        var entries = std.ArrayList(LogEntry).init(allocator);
+        var entries: std.ArrayList(LogEntry) = .empty;
         var i = start_index;
         while (i <= last_index) : (i += 1) {
             if (self.getEntry(i)) |entry| {
-                try entries.append(entry.*);
+                try entries.append(allocator, entry.*);
             }
         }
-        return entries.toOwnedSlice();
+        return entries.toOwnedSlice(allocator);
     }
 };

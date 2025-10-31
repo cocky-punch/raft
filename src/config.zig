@@ -55,7 +55,6 @@ pub const Config = struct {
     pub fn loadFromFile(allocator: Allocator, file_path: []const u8) !Config {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
-
         const contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
         defer allocator.free(contents);
 
@@ -66,7 +65,6 @@ pub const Config = struct {
         // Create an arena allocator for the YAML parsing
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
-
         var yaml_parser = Yaml{ .source = yaml_content };
         defer yaml_parser.deinit(allocator);
 
@@ -74,8 +72,10 @@ pub const Config = struct {
         yaml_parser.load(allocator) catch |err| switch (err) {
             error.ParseFailure => {
                 if (yaml_parser.parse_errors.errorMessageCount() > 0) {
+
+                    //TODO
                     // yaml_parser.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
-                     yaml_parser.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.fs.File.stderr()) });
+                    yaml_parser.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.fs.File.stderr()) });
                 }
                 return error.ParseFailure;
             },

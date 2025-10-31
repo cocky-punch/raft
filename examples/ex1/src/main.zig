@@ -74,7 +74,7 @@ pub fn main() !void {
 
     // Main loop
     while (true) {
-        try cluster.tick();
+        try cluster.processInMemoryData();
         try server.checkCommittedAcks(); // sends acks to clients if commit_index advanced
         // tick to the node every X ms
         std.time.sleep(HEARTBEAT_TICK_DURATION_IN_MS * std.time.ns_per_ms);
