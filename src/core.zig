@@ -457,7 +457,6 @@ pub fn RaftNode(comptime T: type) type {
             }
 
             const follower_index = self.findNodeIndex(resp.follower_id) orelse return;
-
             if (resp.success) {
                 self.match_index[follower_index] = resp.match_index;
                 self.next_index[follower_index] = resp.match_index + 1;
@@ -619,208 +618,6 @@ pub fn RaftNode(comptime T: type) type {
             _ = req;
 
             @panic("not implemented");
-        }
-
-        //FIXME
-        // send Json RPC via TCP
-        fn sendJsonRpc_old_1(self: *Self, peer: cfg.Peer, req: RpcMessage) !RpcMessage {
-            const method = switch (req) {
-                .RequestVote => "requestVote",
-                .AppendEntries => "appendEntries",
-                .InstallSnapshot => "installSnapshot",
-                .TimeoutNow => "timeoutNow",
-                .ClientCommand => "clientCommand",
-                else => return error.InvalidRequestType,
-            };
-
-            const transport_config = switch (self.config.transport) {
-                .json_rpc_http => |x| x,
-                else => return error.InvalidTransport,
-            };
-
-            const rpc_request = struct {
-                jsonrpc: []const u8 = "2.0",
-                method: []const u8,
-                params: RpcMessage,
-                id: u32,
-            }{
-                .method = method,
-                .params = req,
-                .id = @intCast(std.time.timestamp() & 0xFFFFFFFF),
-            };
-
-            //TODO
-            // const json_payload = try std.json.stringifyAlloc(self.allocator, rpc_request, .{});
-            const fmt = std.json.fmt(rpc_request, .{ .whitespace = .indent_2 });
-            var w = std.Io.Writer.Allocating.init(self.allocator);
-            try fmt.format(&w.writer);
-            // const json_payload = try w.toOwnedSlice();
-
-            const protocol = if (transport_config.use_ssl_tls) "https" else "http";
-            const url = try std.fmt.allocPrint(self.allocator, "{s}://{any}:{any}/rpc", .{ protocol, peer.ip, peer.port });
-            defer self.allocator.free(url);
-
-            // response writer
-            var allocating = std.Io.Writer.Allocating.init(self.allocator);
-            defer allocating.deinit();
-
-            const opts: std.http.Client.FetchOptions = .{
-                .method = .POST,
-                .location = .{ .url = url },
-
-                //FIXME
-                // .payload = json_payload,
-                // .payload = jsonrpc_request,
-
-                .response_writer = &allocating.writer,
-                .headers = .{
-                    .content_type = .{ .override = "application/json" },
-                    .user_agent = .{ .override = "raft-node/1.0" },
-                },
-
-                //TODO
-                // https
-                // .ca_bundle = if (transport_config.use_ssl_tls) .{ .rescan = true } else .none,
-            };
-
-            var client: std.http.Client = .{
-                .allocator = self.allocator,
-                .write_buffer_size = 8192,
-            };
-
-            defer client.deinit();
-            const result = try client.fetch(opts);
-
-            // Parse JSON-RPC response envelope first (result is still raw JSON)
-            const JsonRpcResponse = struct {
-                jsonrpc: []const u8,
-                result: ?std.json.Value = null,
-                @"error": ?struct {
-                    code: i32,
-                    message: []const u8,
-                } = null,
-                id: u32,
-            };
-
-            // Check HTTP status
-            if (result.status != .ok) {
-                std.log.warn("HTTP error {} from peer {}\n", .{ @intFromEnum(result.status), peer.id });
-                return error.HttpError;
-            }
-
-            // Parse JSON-RPC response
-            const response_text = allocating.written();
-            const parsed = std.json.parseFromSlice(
-                JsonRpcResponse,
-                self.allocator,
-                response_text,
-                .{},
-            ) catch |err| {
-                std.log.err("Failed to parse JSON-RPC response: {}", .{err});
-                std.debug.print("Raw response:\n{s}\n", .{response_text});
-                return err;
-            };
-            defer parsed.deinit();
-
-            const rpc_response = parsed.value;
-
-            // Validate JSON-RPC version
-            if (!std.mem.eql(u8, rpc_response.jsonrpc, "2.0")) {
-                std.log.err("Invalid JSON-RPC version: {s}", .{rpc_response.jsonrpc});
-                return error.RpcError;
-            }
-
-            // Check for JSON-RPC errors
-            if (rpc_response.@"error") |rpc_error| {
-                std.log.warn("JSON-RPC error from peer {}: {} - {s}\n", .{ peer.id, rpc_error.code, rpc_error.message });
-                return error.RpcError;
-            }
-
-            // Validate response ID matches request ID
-            if (rpc_response.id != rpc_request.id) {
-                std.log.warn("JSON-RPC response ID mismatch from peer {}: expected {}, got {}\n", .{ peer.id, rpc_request.id, rpc_response.id });
-                return error.RpcIdMismatch;
-            }
-
-            // Validate response ID matches request ID
-            if (rpc_response.value.id != rpc_request.id) {
-                std.log.warn("JSON-RPC response ID mismatch from peer {}: expected {}, got {}\n", .{ peer.id, rpc_request.id, rpc_response.value.id });
-                return error.RpcIdMismatch;
-            }
-
-            // Extract result
-            const result_value = rpc_response.result orelse {
-                std.log.err("Missing result in JSON-RPC response\n", .{});
-                return error.MissingRpcResult;
-            };
-
-            // Print successful result
-            std.debug.print("JSON-RPC Response ID: {}\n", .{rpc_response.id});
-            std.debug.print("Result (raw): ", .{});
-
-            var out = std.Io.Writer.Allocating.init(self.allocator);
-            defer out.deinit();
-            var stringifier = std.json.Stringify{
-                .writer = &out.writer,
-                .options = .{ .whitespace = .indent_2 },
-            };
-            try stringifier.write(result_value);
-
-            //DEBUG
-            std.debug.print("{s}\n\n", .{out.writer.buffered()});
-
-            // Convert the raw JSON result back to string for deserialization
-            var result_out = std.Io.Writer.Allocating.init(self.allocator);
-            defer result_out.deinit();
-
-            var result_stringifier = std.json.Stringify{
-                .writer = &result_out.writer,
-                .options = .{},
-            };
-            try result_stringifier.write(result_value);
-
-            // Handle different result types
-            if (result_value == .object) {
-                // If a result is an object, deserialize it
-                const parsed_result = try std.json.parseFromSlice(
-                    RpcMessage,
-                    self.allocator,
-                    result_out.writer.buffered(),
-                    .{},
-                );
-                defer parsed_result.deinit();
-
-                // Validate response type matches request type
-                const is_valid_response = switch (req) {
-                    .RequestVote => switch (parsed_result.value) {
-                        .RequestVoteResponse => true,
-                        else => false,
-                    },
-                    .AppendEntries => switch (parsed_result.value) {
-                        .AppendEntriesResponse => true,
-                        else => false,
-                    },
-                    .InstallSnapshot => switch (parsed_result.value) {
-                        .InstallSnapshotResponse => true,
-                        else => false,
-                    },
-                    .TimeoutNow, .ClientCommand => switch (parsed_result.value) {
-                        .Ack => true,
-                        else => false,
-                    },
-                    else => return error.InvalidRequestType,
-                };
-
-                if (!is_valid_response) {
-                    std.log.warn("Response type mismatch for request type\n", .{});
-                    return error.ResponseTypeMismatch;
-                }
-
-                return parsed_result.value;
-            } else {
-                std.debug.print("Result type: {}\n", .{result_value});
-                return error.ResponseTypeMismatch;
-            }
         }
 
         fn sendJsonRpc(self: *Self, peer: cfg.Peer, req: RpcMessage) !RpcMessage {
@@ -1122,8 +919,6 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         fn detectTransportMismatch(self: *Self, peer_addr: []const u8, data: []const u8) void {
-            // const current_transport = @tagName(self.config.transport);
-
             switch (self.config.transport) {
                 .json_rpc_http => {
                     if (isBinaryData(data)) {
@@ -1373,7 +1168,6 @@ pub fn RaftNode(comptime T: type) type {
             const next_idx = self.next_index[peer_index];
             const prev_log_index = if (next_idx > 0) next_idx - 1 else 0;
             const prev_log_term = self.log.getTermAtIndex(prev_log_index) orelse 0;
-
             const last_index = self.log.getLastIndex();
 
             // Collect entries to send (if any)
@@ -1383,18 +1177,20 @@ pub fn RaftNode(comptime T: type) type {
             // Only send entries if we have new ones for this peer
             if (next_idx <= last_index) {
                 var current_index = next_idx;
+                const max_entries = self.config.protocol.max_entries_per_append;
                 while (current_index <= last_index) : (current_index += 1) {
                     if (self.log.getEntry(current_index)) |entry| {
-                        entries_to_send.append(entry.*) catch |err| {
-                            std.log.err("Failed to append entry {} to entries_to_send: {}", .{ entry.*, err });
-                            return err;
-                        };
+                        try entries_to_send.append(entry.*);
+
+                        // Check if we've reached the limit AFTER adding
+                        if (entries_to_send.items.len >= max_entries) {
+                            break;
+                        }
                     }
                 }
             }
 
-            // const req = AppendEntriesRequest{
-            const req = t.AppendEntries{
+            const append_entries_req = t.AppendEntries{
                 .term = self.current_term,
                 .leader_id = self.config.self_id,
                 .prev_log_index = prev_log_index,
@@ -1403,18 +1199,32 @@ pub fn RaftNode(comptime T: type) type {
                 .leader_commit = self.commit_index,
             };
 
-            //
-            //TODO
-            _ = req;
+            const req = RpcMessage{ .AppendEntries = append_entries_req };
 
-            // Send the AppendEntries RPC
-            // const response = self.rpc_client.sendAppendEntries(peer, req) catch |err| {
-            //     std.log.err("Failed to send AppendEntries to peer {}: {}", .{ peer.id, err });
-            //     return err;
-            // };
+            // Send the AppendEntries RPC and get response
+            const response = self.sendJsonRpc(peer, req) catch |err| {
+                std.log.err("Failed to send AppendEntries to peer {}: {}", .{ peer.id, err });
+                return err;
+            };
 
-            // // Handle response
-            // try self.handleAppendEntriesResponse(peer_index, req, response);
+            std.log.debug("Sent AppendEntries to peer {}: prev_log_index={}, prev_log_term={}, entries_count={}, leader_commit={}", .{
+                peer.id,
+                prev_log_index,
+                prev_log_term,
+                entries_to_send.items.len,
+                self.commit_index,
+            });
+
+            // Handle response
+            switch (response) {
+                .AppendEntriesResponse => |ae_response| {
+                    try self.handleAppendEntriesResponse(peer_index, append_entries_req, ae_response);
+                },
+                else => {
+                    std.log.err("Unexpected response type from peer {}: expected AppendEntriesResponse: {}", .{ peer.id, response });
+                    return error.UnexpectedResponseType;
+                },
+            }
         }
     };
 }
@@ -1456,6 +1266,7 @@ pub fn Cluster(comptime T: type) type {
             try self.node_addresses.put(id, t.PeerAddress{ .ip = ip_addr, .port = ip_port });
         }
 
+        //for in-memory only
         pub fn sendMessage(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
             for (self.nodes.items) |node| {
                 if (node.config.self_id == to_id) {
