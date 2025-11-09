@@ -152,7 +152,7 @@ pub fn RaftNode(comptime T: type) type {
                         .RequestVote => |req| self.handleRequestVote(req, cluster),
                         .RequestVoteResponse => |resp| self.handleRequestVoteResponse(resp, cluster),
                         .AppendEntries => |req| self.handleAppendEntries(req, cluster),
-                        .AppendEntriesResponse => |resp| self.handleAppendEntriesResponse(resp, cluster),
+                        .AppendEntriesResponse => |resp| self.handleAppendEntriesResponse(resp),
 
                         //TODO
                         .InstallSnapshot => |_| {},
@@ -241,7 +241,7 @@ pub fn RaftNode(comptime T: type) type {
                             self.handleRequestVoteResponse(resp, cluster);
                         },
                         RpcMessage.AppendEntriesResponse => |resp| {
-                            self.handleAppendEntriesResponse(resp, cluster);
+                            self.handleAppendEntriesResponse(resp);
                         },
 
                         RpcMessage.InstallSnapshot => |resp| {
@@ -415,16 +415,17 @@ pub fn RaftNode(comptime T: type) type {
             _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
         }
 
-        fn applyCommitted(self: *RaftNode(T)) void {
-            while (self.last_applied < self.commit_index) {
-                const entry = self.log.getEntry(self.last_applied) orelse break;
-                if (self.state_machine) |sm| {
-                    sm.applyLog(entry.*);
-                }
+        //TODO remove
+        // fn applyCommitted(self: *RaftNode(T)) void {
+        //     while (self.last_applied < self.commit_index) {
+        //         const entry = self.log.getEntry(self.last_applied) orelse break;
+        //         if (self.state_machine) |sm| {
+        //             sm.applyLog(entry.*);
+        //         }
 
-                self.last_applied += 1;
-            }
-        }
+        //         self.last_applied += 1;
+        //     }
+        // }
 
         fn handleRequestVoteResponse(self: *RaftNode(T), resp: t.RequestVoteResponse, cluster: *Cluster(T)) void {
             if (self.state != .Candidate) return;
@@ -445,71 +446,6 @@ pub fn RaftNode(comptime T: type) type {
                     self.becomeLeader(cluster) catch {
                         std.debug.print("Failed to becomeLeader for the node_id: {}\n", .{self.config.self_id});
                     };
-                }
-            }
-        }
-
-        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: t.AppendEntriesResponse, cluster: *Cluster(T)) void {
-            if (resp.term > self.current_term) {
-                self.current_term = resp.term;
-                self.becomeFollower();
-                return;
-            }
-
-            const follower_index = self.findNodeIndex(resp.follower_id) orelse return;
-            if (resp.success) {
-                self.match_index[follower_index] = resp.match_index;
-                self.next_index[follower_index] = resp.match_index + 1;
-
-                // Try to advance commit index
-                const majority = (self.config.peers.len / 2) + 1;
-                var new_commit_index = self.commit_index + 1;
-
-                while (new_commit_index <= self.log.getLastIndex()) : (new_commit_index += 1) {
-                    var replicated_count: usize = 1; // count self
-                    for (self.match_index) |idx| {
-                        if (idx >= new_commit_index) replicated_count += 1;
-                    }
-
-                    // Only commit entries from current term
-                    if (replicated_count >= majority and
-                        self.log.getTermAtIndex(new_commit_index - 1) == self.current_term)
-                    {
-                        self.commit_index = new_commit_index;
-
-                        // Apply committed entries
-                        _ = self.applyCommitted();
-
-                        // Broadcast updated commit index to others
-                        for (cluster.nodes.items) |follower| {
-                            if (follower.config.self_id == self.config.self_id) continue;
-
-                            const idx = self.node_id_to_index.get(follower.config.self_id) orelse continue;
-                            const next_idx = self.next_index[idx];
-                            const sliced_entries = self.log.sliceFrom(self.allocator, next_idx) catch |err| blk: {
-                                std.log.err("log.sliceFrom failed: {}", .{err});
-                                break :blk &[_]LogEntry{}; // Empty slice
-                            };
-
-                            const ae = t.AppendEntries{
-                                .term = self.current_term,
-                                .leader_id = self.config.self_id,
-                                .prev_log_index = next_idx - 1,
-                                .prev_log_term = self.log.getTermAtIndex(next_idx - 1) orelse 0,
-                                .entries = @constCast(sliced_entries),
-                                .leader_commit = self.commit_index,
-                            };
-
-                            _ = cluster.sendMessage(follower.config.self_id, .{ .AppendEntries = ae }) catch {
-                                std.debug.print("Failed to send sendMessage to node {}\n", .{follower.config.self_id});
-                            };
-                        }
-                    }
-                }
-            } else {
-                // Step back and retry
-                if (self.next_index[follower_index] > 1) {
-                    self.next_index[follower_index] -= 1;
                 }
             }
         }
@@ -1218,12 +1154,106 @@ pub fn RaftNode(comptime T: type) type {
             // Handle response
             switch (response) {
                 .AppendEntriesResponse => |ae_response| {
+                    //FIXME - wrong signature
                     try self.handleAppendEntriesResponse(peer_index, append_entries_req, ae_response);
                 },
                 else => {
                     std.log.err("Unexpected response type from peer {}: expected AppendEntriesResponse: {}", .{ peer.id, response });
                     return error.UnexpectedResponseType;
                 },
+            }
+        }
+
+        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: t.AppendEntriesResponse) !void {
+            // Step down if there's a higher term
+            if (resp.term > self.current_term) {
+                self.current_term = resp.term;
+                self.becomeFollower();
+                return;
+            }
+
+            // Ignore stale responses
+            if (resp.term < self.current_term or self.state != .Leader) {
+                return;
+            }
+
+            const follower_index = self.findNodeIndex(resp.follower_id) orelse return;
+            if (resp.success) {
+                // Update next_index and match_index
+                self.match_index[follower_index] = resp.match_index;
+                self.next_index[follower_index] = resp.match_index + 1;
+
+                // Try to advance commit index
+                try self.updateCommitIndex();
+            } else {
+                // Decrement next_index and retry
+                if (self.next_index[follower_index] > 1) {
+                    self.next_index[follower_index] -= 1;
+                }
+
+                // Immediately retry with the decremented index
+                const peer = self.getPeerById(resp.follower_id) orelse return;
+                self.sendAppendEntries(peer) catch |err| {
+                    std.log.err("Failed to retry AppendEntries to follower {}: {}", .{ resp.follower_id, err });
+                };
+            }
+        }
+
+        fn updateCommitIndex(self: *RaftNode(T)) !void {
+            if (self.state != .Leader) return;
+
+            const old_commit_index = self.commit_index;
+            const majority = (self.config.peers.len / 2) + 1;
+            const last_index = self.log.getLastIndex();
+
+            // Check each index from commit_index + 1 to last_index
+            var n = self.commit_index + 1;
+            while (n <= last_index) : (n += 1) {
+                // Only commit entries from current term (Raft safety requirement)
+                const term_at_n = self.log.getTermAtIndex(n) orelse continue;
+                if (term_at_n != self.current_term) continue;
+
+                // Count how many nodes have replicated this entry
+                var replicated_count: usize = 1; // Count self
+                for (self.match_index) |match_idx| {
+                    if (match_idx >= n) {
+                        replicated_count += 1;
+                    }
+                }
+
+                // If majority has replicated, update commit_index
+                if (replicated_count >= majority) {
+                    self.commit_index = n;
+                } else {
+                    // Since we go in order, if this index isn't replicated enough,
+                    // neither will higher indices
+                    break;
+                }
+            }
+
+            // Only apply if commit_index actually advanced
+            if (self.commit_index > old_commit_index) {
+                try self.applyCommitted();
+            }
+        }
+
+        fn applyCommitted(self: *RaftNode(T)) !void {
+            while (self.last_applied < self.commit_index) {
+                self.last_applied += 1; // Increment first to get the next entry
+
+                const entry = self.log.getEntry(self.last_applied) orelse {
+                    std.log.err("Missing log entry at index {}", .{self.last_applied});
+                    return error.MissingLogEntry;
+                };
+
+                if (self.state_machine) |sm| {
+                    sm.applyLog(entry.*) catch |err| {
+                        std.log.err("Failed to apply log entry at index {}: {}", .{ self.last_applied, err });
+                        return err;
+                    };
+                }
+
+                std.log.debug("Applied log entry at index {}", .{self.last_applied});
             }
         }
     };
