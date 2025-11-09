@@ -1,6 +1,6 @@
 pub const RaftNode = @import("core.zig").RaftNode;
 pub const Cluster = @import("core.zig").Cluster;
-pub const Command = @import("command_v3.zig").Command;
+pub const Command = @import("command.zig").Command;
 pub const RpcMessage = @import("types.zig").RpcMessage;
 pub const Config = @import("config.zig").Config;
 pub const StateMachine = @import("state_machine.zig").StateMachine;

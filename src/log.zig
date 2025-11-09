@@ -2,7 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const crc32 = std.hash.crc.Crc32;
-const Command = @import("command_v3.zig").Command;
+const Command = @import("command.zig").Command;
 
 pub const LogConfig = struct {
     storage_type: enum { memory, persistent },

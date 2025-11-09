@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const Command = @import("command_v3.zig").Command;
+pub const Command = @import("command.zig").Command;
 const LogEntry = @import("log.zig").LogEntry;
 
 pub const Term = u64;

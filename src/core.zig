@@ -8,7 +8,7 @@ const NodeId = t.NodeId;
 const RpcMessage = t.RpcMessage;
 const Log = @import("log.zig").Log;
 const LogEntry = @import("log.zig").LogEntry;
-const cmd_mod = @import("command_v3.zig");
+const cmd_mod = @import("command.zig");
 const Command = cmd_mod.Command;
 const ClientCommandResult = cmd_mod.ClientCommandResult;
 const cfg = @import("config.zig");
@@ -414,18 +414,6 @@ pub fn RaftNode(comptime T: type) type {
 
             _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
         }
-
-        //TODO remove
-        // fn applyCommitted(self: *RaftNode(T)) void {
-        //     while (self.last_applied < self.commit_index) {
-        //         const entry = self.log.getEntry(self.last_applied) orelse break;
-        //         if (self.state_machine) |sm| {
-        //             sm.applyLog(entry.*);
-        //         }
-
-        //         self.last_applied += 1;
-        //     }
-        // }
 
         fn handleRequestVoteResponse(self: *RaftNode(T), resp: t.RequestVoteResponse, cluster: *Cluster(T)) void {
             if (self.state != .Candidate) return;
@@ -1153,9 +1141,8 @@ pub fn RaftNode(comptime T: type) type {
 
             // Handle response
             switch (response) {
-                .AppendEntriesResponse => |ae_response| {
-                    //FIXME - wrong signature
-                    try self.handleAppendEntriesResponse(peer_index, append_entries_req, ae_response);
+                .AppendEntriesResponse => |x| {
+                    try self.handleAppendEntriesResponse(x);
                 },
                 else => {
                     std.log.err("Unexpected response type from peer {}: expected AppendEntriesResponse: {}", .{ peer.id, response });
