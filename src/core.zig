@@ -77,6 +77,7 @@ pub fn RaftNode(comptime T: type) type {
                 try node_id_to_index.put(peer.id, i);
             }
 
+
             // Initialize log based on config
             var log_opts = std.StringHashMap([]const u8).init(allocator);
             defer log_opts.deinit();
@@ -445,7 +446,7 @@ pub fn RaftNode(comptime T: type) type {
                 const majority = (cluster.nodes.items.len / 2) + 1;
                 if (self.votes_received >= majority and self.state == .Candidate) {
                     // Become leader once majority is reached
-                    self.becomeLeader(cluster) catch {
+                    self.becomeLeader() catch {
                         std.debug.print("Failed to becomeLeader for the node_id: {}\n", .{self.config.self_id});
                     };
                 }
@@ -988,6 +989,7 @@ pub fn RaftNode(comptime T: type) type {
             for (self.config.peers, 0..) |peer, i| {
                 if (peer.id == peer_id) return i;
             }
+
             return null; // Peer not found - this is an error condition
         }
 
@@ -1015,20 +1017,18 @@ pub fn RaftNode(comptime T: type) type {
             //  self.broadcastAppendEntriesNow = true;
         }
 
-        fn becomeLeader(self: *RaftNode(T), cluster: *Cluster(T)) !void {
-            const count = cluster.nodes.items.len;
-
+        fn becomeLeader(self: *RaftNode(T)) !void {
+            const count = self.config.peers.len;
             self.next_index = try self.allocator.alloc(usize, count);
             self.match_index = try self.allocator.alloc(usize, count);
 
-            for (cluster.nodes.items, 0..) |node, i| {
-                try self.node_id_to_index.put(node.config.self_id, i);
-                self.next_index[i] = self.log.getLastIndex() + 1;
-                self.match_index[i] = 0;
-            }
+            const initial_next_index = self.log.getLastIndex() + 1;
+            @memset(self.next_index, initial_next_index);
+            @memset(self.match_index, 0);
 
             self.sendHeartbeats();
         }
+
 
         //TODO
         fn createSnapshot(self: *RaftNode(T)) !void {
@@ -1326,16 +1326,19 @@ pub fn Cluster(comptime T: type) type {
             }
         }
 
-        pub fn processInMemoryData(self: *Self) !void {
-            for (self.nodes.items) |node| {
-                node.processInMemoryData(self);
-            }
 
-            //TODO: merge the loops
-            for (self.nodes.items) |node| {
-                try node.processMessages(self);
-            }
-        }
+        // TODO: remove?
+        // pub fn processInMemoryData(self: *Self) !void {
+        //     for (self.nodes.items) |node| {
+        //         node.processInMemoryData(self);
+        //     }
+
+        //     //TODO: merge the loops
+        //     for (self.nodes.items) |node| {
+        //         try node.processMessages(self);
+        //     }
+        // }
+
 
         //for TCP, sockets transport; real network, distributed clusters
         pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
