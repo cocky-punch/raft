@@ -30,7 +30,7 @@ pub fn RaftNode(comptime T: type) type {
 
         log: Log,
         election_deadline: u64 = 0, // ms timestamp
-        last_successful_heartbeat: i64 = 0,
+        last_successful_heartbeat: u64 = 0,
 
         inbox: std.ArrayList(RpcMessage),
         nodes_buffer: std.ArrayList(cfg.Peer),
@@ -144,7 +144,7 @@ pub fn RaftNode(comptime T: type) type {
         //NOTE
         //in-memory transport only
         pub fn processInMemoryData(self: *RaftNode(T), cluster: *Cluster(T)) void {
-            const now = std.time.milliTimestamp();
+            const now_ms: u64 = @intCast(std.time.milliTimestamp());
 
             // Process incoming messages first
             while (self.inbox.items.len > 0) {
@@ -183,7 +183,7 @@ pub fn RaftNode(comptime T: type) type {
             // Handle state-specific periodic work
             switch (self.state) {
                 .Follower, .Candidate => {
-                    if (now >= self.election_deadline) {
+                    if (now_ms >= self.election_deadline) {
                         self.startElection(cluster);
                     }
                 },
@@ -1082,9 +1082,9 @@ pub fn RaftNode(comptime T: type) type {
                 return false;
             }
 
-            const now = std.time.milliTimestamp();
+            const now_ms: u64 = @intCast(std.time.milliTimestamp());
             const lease_duration_ms = self.config.protocol.leader_lease_timeout_ms;
-            return (now - self.last_successful_heartbeat) < lease_duration_ms;
+            return (now_ms - self.last_successful_heartbeat) < lease_duration_ms;
         }
 
         fn triggerReplication(self: *Self) !void {
