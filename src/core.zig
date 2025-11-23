@@ -13,6 +13,7 @@ const Command = cmd_mod.Command;
 const ClientCommandResult = cmd_mod.ClientCommandResult;
 const cfg = @import("config.zig");
 const Config = cfg.Config;
+const RaftError = @import("raft_error.zig").RaftError;
 
 const RaftTcpServer = @import("raft_tcp_server.zig").RaftTcpServer;
 const ElectionTimeoutBase: u64 = 150;
@@ -151,8 +152,16 @@ pub fn RaftNode(comptime T: type) type {
                     switch (msg) {
                         .RequestVote => |req| self.handleRequestVote(req, cluster),
                         .RequestVoteResponse => |resp| self.handleRequestVoteResponse(resp, cluster),
-                        .AppendEntries => |req| self.handleAppendEntries(req, cluster),
-                        .AppendEntriesResponse => |resp| self.handleAppendEntriesResponse(resp),
+                        .AppendEntries => |req| {
+                            self.handleAppendEntries(req, cluster) catch |err| {
+                                std.log.err("Failed to handle handleAppendEntries: {}", .{err});
+                            };
+                        },
+                        .AppendEntriesResponse => |resp| {
+                            self.handleAppendEntriesResponse(resp) catch |err| {
+                                std.log.err("Failed to handle AppendEntriesResponse: {}", .{err});
+                            };
+                        },
 
                         //TODO
                         .InstallSnapshot => |_| {},
@@ -334,7 +343,8 @@ pub fn RaftNode(comptime T: type) type {
             };
         }
 
-        fn handleAppendEntries(self: *RaftNode(T), req: t.AppendEntries, cluster: *Cluster(T)) void {
+        fn handleAppendEntries(self: *RaftNode(T), req: t.AppendEntries, cluster: *Cluster(T)) !void {
+            // Reject requests from older terms
             if (req.term < self.current_term) {
                 const resp = t.AppendEntriesResponse{
                     .term = self.current_term,
@@ -342,77 +352,81 @@ pub fn RaftNode(comptime T: type) type {
                     .follower_id = self.config.self_id,
                     .match_index = 0,
                 };
-
-                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {
-                    std.debug.print("Failed to send AppendEntriesResponse to node_id: {}\n", .{req.leader_id});
-                };
+                try cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp });
                 return;
             }
 
+            // Valid AppendEntries - reset election timeout
+            self.resetElectionTimeout();
             self.leader_id = req.leader_id;
 
-            // If term is greater, step down
+            // If term is greater or equal, step down if needed
             if (req.term > self.current_term) {
                 self.current_term = req.term;
+                self.voted_for = null;
+            }
+
+            // Always become/stay follower when receiving valid AppendEntries
+            if (self.state != .Follower) {
                 self.becomeFollower();
-            } else {
-                //TODO
-                // self.resetElectionTimeout();
             }
 
             // Log consistency check
-            const prev_log_term = self.log.getTermAtIndex(req.prev_log_index);
-            if (prev_log_term == null or prev_log_term.? != req.prev_log_term) {
-                const resp = t.AppendEntriesResponse{
-                    .term = self.current_term,
-                    .success = false,
-                    .follower_id = self.config.self_id,
-                    .match_index = 0,
-                };
-
-                _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {
-                    std.log.err("Failed to send AppendEntriesResponse to node_id: {}\n", .{req.leader_id});
-                };
-
-                return;
-            }
-
-            // Append new entries (if any), replacing conflicts
-            var i: usize = 0;
-            while (i < req.entries.len) {
-                const index = req.prev_log_index + 1 + i;
-                const existing = self.log.getEntry(index);
-
-                if (existing == null or existing.?.term != req.entries[i].term) {
-                    // Truncate and append
-                    self.log.truncateFrom(index) catch {
-                        std.debug.print("Failed to truncate entries; index: {}\n", .{index});
+            // Special case: prev_log_index = 0 means appending to empty log
+            if (req.prev_log_index > 0) {
+                const prev_log_term = self.log.getTermAtIndex(req.prev_log_index);
+                if (prev_log_term == null or prev_log_term.? != req.prev_log_term) {
+                    // Log doesn't match - send failure with our last log index
+                    const resp = t.AppendEntriesResponse{
+                        .term = self.current_term,
+                        .success = false,
+                        .follower_id = self.config.self_id,
+                        .match_index = self.log.getLastIndex(), // Send our actual match
                     };
-
-                    _ = self.log.appendSlice(req.entries[i..]) catch {
-                        std.debug.print("Failed to append entries; index: {}; i: {}\n", .{ index, i });
-                    };
-                    break;
+                    try cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp });
+                    return;
                 }
-
-                i += 1;
             }
 
-            // Update commit index
+            // Append new entries, replacing conflicts
+            if (req.entries.len > 0) {
+                var i: usize = 0;
+                while (i < req.entries.len) : (i += 1) {
+                    const index = req.prev_log_index + 1 + i;
+                    const existing = self.log.getEntry(index);
+
+                    // If there's a conflict or no existing entry, truncate and append rest
+                    if (existing == null or existing.?.term != req.entries[i].term) {
+                        try self.log.truncateFrom(index);
+                        try self.log.appendSlice(req.entries[i..]);
+                        break;
+                    }
+                    // Else: entry matches, continue checking next
+                }
+            }
+
+            // Update commit index based on leader's commit
             if (req.leader_commit > self.commit_index) {
-                const new_commit = @min(req.leader_commit, self.log.getLastIndex());
-                self.commit_index = new_commit;
-                _ = self.applyCommitted(); // Apply entries to state machine
+                const last_new_entry = self.log.getLastIndex();
+                self.commit_index = @min(req.leader_commit, last_new_entry);
+                try self.applyCommitted();
             }
 
+            // Send success response
             const resp = t.AppendEntriesResponse{
                 .term = self.current_term,
                 .success = true,
                 .follower_id = self.config.self_id,
                 .match_index = req.prev_log_index + req.entries.len,
             };
+            try cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp });
 
-            _ = cluster.sendMessage(req.leader_id, .{ .AppendEntriesResponse = resp }) catch {};
+            std.log.debug("Accepted AppendEntries from leader {}: prev_log_index={}, entries={}, commit={}", .{
+                req.leader_id,
+                req.prev_log_index,
+                req.entries.len,
+                self.commit_index,
+            });
         }
 
         fn handleRequestVoteResponse(self: *RaftNode(T), resp: t.RequestVoteResponse, cluster: *Cluster(T)) void {
@@ -971,9 +985,16 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         fn getPeerIndex(self: *Self, peer_id: u64) ?usize {
-            // Find the array index of peer with given ID in our peers array
             for (self.config.peers, 0..) |peer, i| {
                 if (peer.id == peer_id) return i;
+            }
+            return null; // Peer not found - this is an error condition
+        }
+
+        //TODO
+        fn getPeerById(self: *Self, peer_id: u64) ?cfg.Peer {
+            for (self.config.peers) |peer| {
+                if (peer.id == peer_id) return peer;
             }
             return null; // Peer not found - this is an error condition
         }
@@ -1086,7 +1107,7 @@ pub fn RaftNode(comptime T: type) type {
         fn sendAppendEntries(self: *Self, peer: cfg.Peer) !void {
             const peer_index = self.getPeerIndex(peer.id) orelse {
                 std.log.err("Peer {} not found in peers array", .{peer.id});
-                return error.PeerNotFound;
+                return;
             };
 
             const next_idx = self.next_index[peer_index];
@@ -1095,8 +1116,8 @@ pub fn RaftNode(comptime T: type) type {
             const last_index = self.log.getLastIndex();
 
             // Collect entries to send (if any)
-            var entries_to_send = std.ArrayList(LogEntry).init(self.allocator);
-            defer entries_to_send.deinit();
+            var entries_to_send: std.ArrayList(LogEntry) = .empty;
+            defer entries_to_send.deinit(self.allocator);
 
             // Only send entries if we have new ones for this peer
             if (next_idx <= last_index) {
@@ -1104,7 +1125,7 @@ pub fn RaftNode(comptime T: type) type {
                 const max_entries = self.config.protocol.max_entries_per_append;
                 while (current_index <= last_index) : (current_index += 1) {
                     if (self.log.getEntry(current_index)) |entry| {
-                        try entries_to_send.append(entry.*);
+                        try entries_to_send.append(self.allocator, entry.*);
 
                         // Check if we've reached the limit AFTER adding
                         if (entries_to_send.items.len >= max_entries) {
@@ -1151,7 +1172,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: t.AppendEntriesResponse) !void {
+        fn handleAppendEntriesResponse(self: *RaftNode(T), resp: t.AppendEntriesResponse) RaftError!void {
             // Step down if there's a higher term
             if (resp.term > self.current_term) {
                 self.current_term = resp.term;
@@ -1180,6 +1201,10 @@ pub fn RaftNode(comptime T: type) type {
 
                 // Immediately retry with the decremented index
                 const peer = self.getPeerById(resp.follower_id) orelse return;
+
+                //NOTE
+                // Error is logged but not propagated - might be OK for network failures
+                // revisit it
                 self.sendAppendEntries(peer) catch |err| {
                     std.log.err("Failed to retry AppendEntries to follower {}: {}", .{ resp.follower_id, err });
                 };
@@ -1220,7 +1245,9 @@ pub fn RaftNode(comptime T: type) type {
 
             // Only apply if commit_index actually advanced
             if (self.commit_index > old_commit_index) {
-                try self.applyCommitted();
+                self.applyCommitted() catch |err| {
+                    std.log.err("applyCommitted {}", .{err});
+                };
             }
         }
 
@@ -1230,14 +1257,11 @@ pub fn RaftNode(comptime T: type) type {
 
                 const entry = self.log.getEntry(self.last_applied) orelse {
                     std.log.err("Missing log entry at index {}", .{self.last_applied});
-                    return error.MissingLogEntry;
+                    return;
                 };
 
                 if (self.state_machine) |sm| {
-                    sm.applyLog(entry.*) catch |err| {
-                        std.log.err("Failed to apply log entry at index {}: {}", .{ self.last_applied, err });
-                        return err;
-                    };
+                    sm.applyLog(entry.*);
                 }
 
                 std.log.debug("Applied log entry at index {}", .{self.last_applied});

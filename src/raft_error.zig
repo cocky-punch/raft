@@ -7,4 +7,5 @@ pub const RaftError = error{
     AlreadyExists,
     InvalidCommand,
     InternalFailure,
+    PeerNotFound,
 };

@@ -19,7 +19,7 @@ const DummyStateMachine = struct {
     }
 };
 
-test "Follower becomes Candidate on election timeout" {
+test "Follower becomes Candidate on election timeout, on in-memory transport" {
     const allocator = testing.allocator;
     var dt1 = DummyStateMachine{};
     const sm = StateMachine(DummyStateMachine).init(&dt1);
@@ -81,6 +81,14 @@ test "Follower becomes Candidate on election timeout" {
     node.state = .Follower;
     node.resetElectionTimeout();
 
-    // node.processInMemoryData(&cluster);
+    // still a follower
+    try testing.expectEqual(node.state, .Follower);
+
+    // Wait for the election timeout to expire (150ms minimum + some buffer)
+    std.Thread.sleep(350 * std.time.ns_per_ms);
+
+    // now process the timeout
+    node.processInMemoryData(&cluster);
+
     try testing.expectEqual(node.state, .Candidate);
 }
