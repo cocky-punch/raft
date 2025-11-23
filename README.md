@@ -3,6 +3,7 @@
 An implementation of Raft Consensus Algorithm in Zig
 
 ## Features
+- [ ] support of Zig 0.15
 - [x] Leader tracking
 - [x] In-memory transport
 - [x] Cluster-wide coordination
