@@ -1271,12 +1271,15 @@ pub fn RaftNode(comptime T: type) type {
 }
 
 
-// cluster of the nodes if they're run "in-memory"
+// Cluster of the nodes if they're run "in-memory":
+// on the single machine in a single process,
+// without actual networking involved,
+// communicating with each other via direct memory operations;
+// Used for simulation and testing
 pub fn InMemorySimulatedCluster(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
         nodes: std.ArrayList(*RaftNode(T)),
-        // node_addresses: std.AutoHashMap(NodeId, t.PeerAddress),
 
         const Self = @This();
 
@@ -1284,7 +1287,6 @@ pub fn InMemorySimulatedCluster(comptime T: type) type {
             return Self{
                 .allocator = allocator,
                 .nodes = .empty,
-                // .node_addresses = std.AutoHashMap(NodeId, t.PeerAddress).init(allocator),
             };
         }
 
@@ -1295,23 +1297,10 @@ pub fn InMemorySimulatedCluster(comptime T: type) type {
             self.nodes.deinit(self.allocator);
         }
 
-        //for "in-memory" transport; simulation
         pub fn addNode(self: *Self, node: *RaftNode(T)) !void {
             try self.nodes.append(node);
         }
 
-
-        // TODO: remove
-        //for TCP, sockets transport; real network, distributed clusters
-        // pub fn addNodeAddress(self: *Self, id: NodeId, addr: t.PeerAddress) !void {
-        //     try self.node_addresses.put(id, addr);
-        // }
-
-        // pub fn addNodeAddress2(self: *Self, id: NodeId, ip_addr: []const u8, ip_port: u16) !void {
-        //     try self.node_addresses.put(id, t.PeerAddress{ .ip = ip_addr, .port = ip_port });
-        // }
-
-        //for in-memory only
         pub fn sendMessage(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
             for (self.nodes.items) |node| {
                 if (node.config.self_id == to_id) {
@@ -1341,20 +1330,6 @@ pub fn InMemorySimulatedCluster(comptime T: type) type {
         //     for (self.nodes.items) |node| {
         //         try node.processMessages(self);
         //     }
-        // }
-
-
-        //for TCP, sockets transport; real network, distributed clusters
-        // pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
-        //     // const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
-        //     // const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
-        //     // defer stream.close();
-        //     // try msg.serialize(stream.writer());
-        //     _ = self;
-        //     _ = to_id;
-        //     _ = msg;
-
-        //     @panic("deprecated; use RaftNode#sendRpc(...)");
         // }
     };
 }
