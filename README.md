@@ -124,7 +124,7 @@ pub fn main() !void {
     };
 
     const Node = raft.RaftNode(MyStateMachine);
-    const ClusterT = raft.Cluster(MyStateMachine);
+    const ClusterT = raft.InMemorySimulatedCluster(MyStateMachine);
     var cluster = ClusterT.init(allocator);
     var node = try Node.init(allocator, config.self_id, sm);
 

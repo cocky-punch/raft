@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 const RaftNode = @import("core.zig").RaftNode;
-const Cluster = @import("core.zig").Cluster;
+const InMemorySimulatedCluster = @import("core.zig").InMemorySimulatedCluster;
 const RpcMessage = @import("types.zig").RpcMessage;
 const Command = @import("command.zig").Command;
 const StateMachine = @import("state_machine.zig").StateMachine;
@@ -23,7 +23,7 @@ test "Follower becomes Candidate on election timeout, on in-memory transport" {
     const allocator = testing.allocator;
     var dt1 = DummyStateMachine{};
     const sm = StateMachine(DummyStateMachine).init(&dt1);
-    var cluster = Cluster(DummyStateMachine).init(allocator);
+    var cluster = InMemorySimulatedCluster(DummyStateMachine).init(allocator);
     defer cluster.deinit();
 
     const cfg1 = cfg.Config.parseFromString(allocator,

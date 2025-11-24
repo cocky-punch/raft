@@ -111,7 +111,7 @@ pub fn RaftNode(comptime T: type) type {
             // deinit self.snapshot
         }
 
-        fn startElection(self: *RaftNode(T), cluster: *Cluster(T)) void {
+        fn startElection(self: *RaftNode(T), cluster: *InMemorySimulatedCluster(T)) void {
             self.becomeCandidate();
             self.votes_received = 1; // vote for self
             self.total_votes = self.config.peers.len;
@@ -144,7 +144,7 @@ pub fn RaftNode(comptime T: type) type {
 
         //NOTE
         //in-memory transport only
-        pub fn processInMemoryData(self: *RaftNode(T), cluster: *Cluster(T)) void {
+        pub fn processInMemoryData(self: *RaftNode(T), cluster: *InMemorySimulatedCluster(T)) void {
             const now_ms: u64 = @intCast(std.time.milliTimestamp());
 
             // Process incoming messages first
@@ -237,7 +237,7 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         //in-memory only
-        pub fn processMessages(self: *RaftNode(T), cluster: *Cluster(T)) !void {
+        pub fn processMessages(self: *RaftNode(T), cluster: *InMemorySimulatedCluster(T)) !void {
             while (self.inbox.items.len > 0) {
                 if (self.inbox.pop()) |msg| {
                     switch (msg) {
@@ -303,7 +303,7 @@ pub fn RaftNode(comptime T: type) type {
             }
         }
 
-        fn handleRequestVote(self: *RaftNode(T), req: t.RequestVote, cluster: *Cluster(T)) void {
+        fn handleRequestVote(self: *RaftNode(T), req: t.RequestVote, cluster: *InMemorySimulatedCluster(T)) void {
             if (req.term > self.current_term) {
                 self.current_term = req.term;
                 self.voted_for = null;
@@ -344,7 +344,7 @@ pub fn RaftNode(comptime T: type) type {
             };
         }
 
-        fn handleAppendEntries(self: *RaftNode(T), req: t.AppendEntries, cluster: *Cluster(T)) !void {
+        fn handleAppendEntries(self: *RaftNode(T), req: t.AppendEntries, cluster: *InMemorySimulatedCluster(T)) !void {
             // Reject requests from older terms
             if (req.term < self.current_term) {
                 const resp = t.AppendEntriesResponse{
@@ -430,7 +430,7 @@ pub fn RaftNode(comptime T: type) type {
             });
         }
 
-        fn handleRequestVoteResponse(self: *RaftNode(T), resp: t.RequestVoteResponse, cluster: *Cluster(T)) void {
+        fn handleRequestVoteResponse(self: *RaftNode(T), resp: t.RequestVoteResponse, cluster: *InMemorySimulatedCluster(T)) void {
             if (self.state != .Candidate) return;
 
             if (resp.term > self.current_term) {
@@ -1038,7 +1038,7 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         //TODO
-        fn installSnapshot(self: *RaftNode(T), snap: t.InstallSnapshot, cluster: *Cluster(T)) !void {
+        fn installSnapshot(self: *RaftNode(T), snap: t.InstallSnapshot, cluster: *InMemorySimulatedCluster(T)) !void {
             _ = self;
             _ = snap;
             _ = cluster;
@@ -1047,7 +1047,7 @@ pub fn RaftNode(comptime T: type) type {
         }
 
         //TODO
-        pub fn transferLeadership(self: *RaftNode(T), cluster: *Cluster(T), target_id: u64) void {
+        pub fn transferLeadership(self: *RaftNode(T), cluster: *InMemorySimulatedCluster(T), target_id: u64) void {
             becomeFollower(self);
             // Tell the target to start election
             cluster.send(target_id, .{ .TimeoutNow = {} });
@@ -1270,11 +1270,13 @@ pub fn RaftNode(comptime T: type) type {
     };
 }
 
-pub fn Cluster(comptime T: type) type {
+
+// cluster of the nodes if they're run "in-memory"
+pub fn InMemorySimulatedCluster(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
         nodes: std.ArrayList(*RaftNode(T)),
-        node_addresses: std.AutoHashMap(NodeId, t.PeerAddress),
+        // node_addresses: std.AutoHashMap(NodeId, t.PeerAddress),
 
         const Self = @This();
 
@@ -1282,7 +1284,7 @@ pub fn Cluster(comptime T: type) type {
             return Self{
                 .allocator = allocator,
                 .nodes = .empty,
-                .node_addresses = std.AutoHashMap(NodeId, t.PeerAddress).init(allocator),
+                // .node_addresses = std.AutoHashMap(NodeId, t.PeerAddress).init(allocator),
             };
         }
 
@@ -1298,14 +1300,16 @@ pub fn Cluster(comptime T: type) type {
             try self.nodes.append(node);
         }
 
-        //for TCP, sockets transport; real network, distributed clusters
-        pub fn addNodeAddress(self: *Self, id: NodeId, addr: t.PeerAddress) !void {
-            try self.node_addresses.put(id, addr);
-        }
 
-        pub fn addNodeAddress2(self: *Self, id: NodeId, ip_addr: []const u8, ip_port: u16) !void {
-            try self.node_addresses.put(id, t.PeerAddress{ .ip = ip_addr, .port = ip_port });
-        }
+        // TODO: remove
+        //for TCP, sockets transport; real network, distributed clusters
+        // pub fn addNodeAddress(self: *Self, id: NodeId, addr: t.PeerAddress) !void {
+        //     try self.node_addresses.put(id, addr);
+        // }
+
+        // pub fn addNodeAddress2(self: *Self, id: NodeId, ip_addr: []const u8, ip_port: u16) !void {
+        //     try self.node_addresses.put(id, t.PeerAddress{ .ip = ip_addr, .port = ip_port });
+        // }
 
         //for in-memory only
         pub fn sendMessage(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
@@ -1341,16 +1345,16 @@ pub fn Cluster(comptime T: type) type {
 
 
         //for TCP, sockets transport; real network, distributed clusters
-        pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
-            // const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
-            // const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
-            // defer stream.close();
-            // try msg.serialize(stream.writer());
-            _ = self;
-            _ = to_id;
-            _ = msg;
+        // pub fn sendRpc(self: *Self, to_id: NodeId, msg: RpcMessage) !void {
+        //     // const addr = self.node_addresses.get(to_id) orelse return error.UnknownPeer;
+        //     // const stream = try std.net.tcpConnectToHost(self.allocator, addr.ip, addr.port);
+        //     // defer stream.close();
+        //     // try msg.serialize(stream.writer());
+        //     _ = self;
+        //     _ = to_id;
+        //     _ = msg;
 
-            @panic("deprecated; use RaftNode#sendRpc(...)");
-        }
+        //     @panic("deprecated; use RaftNode#sendRpc(...)");
+        // }
     };
 }
